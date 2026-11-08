@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notify_connecting">Connecting…</string>
+    <string name="notify_connected">Connected %1$s</string>
+    <string name="notify_stop">Disconnect</string>
+    <string name="notify_total">total ↑%1$s ↓%2$s</string>
+</resources>

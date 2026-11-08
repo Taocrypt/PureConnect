@@ -1,0 +1,326 @@
+write captcha image: boom
+virtual IP update is not IPv4
+unknown SMS authentication mode
+underlay dialer is required
+token is nil
+remove old virtual IP: boom: x
+open TLS key log: boom
+offline
+not implemented
+no Rcs element found
+invalid status code: 3
+invalid sign key: boom
+invalid callback url: path not match
+invalid RSA public key modulus
+invalid RSA public key exponent "x"
+empty line list
+domain resources not available
+dial failed: boom
+dial failed
+close TLS key log: boom
+click captcha response is empty
+captcha code is empty
+callback URL is empty
+authentication code is empty
+add virtual IP: boom: x
+aTrust anti-MITM request failed: boom
+VPN client setup error: boom
+SMS authentication requires authId
+IP set not available
+IP resources not available
+IP not available
+DNS servers not available
+DNS server not available
+DNS resource not available
+username and password are required
+update_session: unexpected status 3
+update_session: unexpected reply message="x" error_code="x"
+update_session: parse reply: boom
+untrustDevice failed with code 3: x
+unsupported token authentication service: x
+unsupported text captcha challenge
+unsupported protocol "x"
+unsupported protocol 3
+unsupported next authentication service: x
+unsupported front proxy "x" (use socks5:// or http://)
+unsupported external login challenge: x
+unsupported enhanced authentication service: x
+unsupported click captcha response format
+unsupported click captcha challenge
+unsupported authentication code challenge: x
+unsupported auth type: x
+unsupported VPN protocol: x
+unsupport IP version 3
+unknown configuration key "x"
+unexpected tcp tunnel server hello: 00 00
+unexpected tcp tunnel connect version: 0x00
+unexpected tcp tunnel bind address type: 0x00
+unexpected tcp tunnel auth response: 00 00
+unexpected send handshake reply: 0x00
+unexpected request IP reply
+unexpected recv handshake reply
+unexpected non-IPv4 VIP response
+unexpected UDP dial
+unexpected TCP tunnel data frame header: 00
+unexpected SMS response: 
+unexpected L3 tunnel version 0x00
+unexpected L3 tunnel command 0x00
+unexpected IPv4 VIP response: 00
+unexpected IPv4 VIP response length: 3
+unexpected IP version 3
+unexpected IP tunnel auth response version: 0x00
+unexpected IP tunnel auth method response: 00
+tunnel closed
+tun_mode is not supported on Android; the app uses VpnService (android_fd) instead
+tun_fd_socket is required for android_fd mode
+trustDevice failed with code 3: x
+token authentication type is missing
+token authentication failed with code 3: x
+tls write failed: boom
+ticket is empty
+text captcha output path is empty
+temporary network error
+tcp tunnel server failure
+tcp tunnel connection not allowed
+tcp tunnel connect failed with status 0x00
+tcp tunnel command not supported
+tcp tunnel authentication failed (code 3): x
+tcp tunnel auth request too large: 3 bytes
+tcp tunnel address type not supported
+tcp tunnel TTL expired
+stop after capturing stack call
+smsCheckCode failed with code 3: x
+server disable Mline
+sendSms failed with code 3: x
+sendCustomSMS failed with code 3: x
+sangfor: SHUTDOWN (cmd 0x08)
+sangfor: RECONNECT_LATER (cmd 0x05/0x06/0x07/0x09)
+run TUN mode using sudo to grant necessary permissions
+resource not found
+reportEnv failed with code 3
+refresh rejected: boom
+receive TUN fd: boom
+read resource file: boom
+read certificate file: boom
+queryDevice failed with code 3: x
+protocol x not support
+protocol 3: boom
+protocol 3 not supported, skip
+port forwarding: unknown network type "x"
+port forwarding: bind and remote address are required
+phoneNumber failed with code 3: x
+payload too short
+payload too short for meta
+payload token overflow
+payload meta overflow
+password authentication succeeded without a ticket
+password authentication failed with code 3: x
+parse phoneNumber: boom
+parse phoneNumber list: boom
+parse config: boom
+panic: x
+packet length overflow
+packet data overflow
+open L3 tunnel: boom
+only IPv4 is supported
+onlineInfo failed with code 3
+not supported
+not found
+not a valid IPv4 address
+no reachable node for ip request
+no list attribute found
+no file descriptor received
+no available node for group x
+no available line
+no available aTrust node for group "x"
+no VPN resources found for x:3, [x], skip
+no VPN resources found for x, [x], skip
+no Mline element found
+no Dns dnsserver attribute found
+no Dns data attribute found
+network stack does not support virtual IP updates
+network is unreachable
+need 3 trusted device number(s), got 3
+missing credentials for the selected aTrust auth type
+missing conntrack hash
+meta too short
+meta length is zero
+meta ipv6 too short
+meta ipv4 too short
+login method is nil, but user is not logged in
+load defaults: boom
+load config: boom
+l3-tunnel vip status 3
+l3-tunnel unsupported vip address type 3
+l3-tunnel unexpected vip version: 00
+l3-tunnel unexpected auth resp version: 0x00
+l3-tunnel unexpected auth method resp: 00 00
+l3-tunnel tunnel auth status 3
+l3-tunnel tunnel auth failed: 3 x
+l3-tunnel pending packet cache full
+l3-tunnel invalid vip header length 3
+l3-tunnel conntrack evicted
+l3-tunnel connect token too long: 3
+l3-tunnel auth timeout
+l3-tunnel auth timeout for unrelated text
+invalid trusted device number "x"
+invalid redirect url: scheme not https
+invalid redirect url: path not match
+invalid redirect url: host not match
+invalid redirect url: data not found
+invalid portal data: ticket not found
+invalid packet length
+invalid ipv4 addr
+invalid ip version
+invalid image dimensions: 3x3
+invalid host: x
+invalid dimensions: 3x3
+invalid coordinates
+invalid click captcha coordinate
+invalid checksum
+invalid callback url: ticket not found
+invalid callback url: code not found
+invalid VPN server port: 3
+invalid IPv4 packet length 3 with header length 3
+invalid EasyConnect captcha response: boom
+host:x port:3 prefers L3 tunnel: boom
+host:x port:3 is not resource: boom
+host is unreachable
+generate TOTP token: boom
+gVisor stack setup error: boom
+front proxy stack: boom
+front proxy CONNECT: x
+failed to start captcha server: boom
+failed to set tcp tunnel handshake timeout: boom
+failed to send tcp tunnel handshake: boom
+failed to save client data: boom
+failed to read tcp tunnel server hello: boom
+failed to read tcp tunnel protocol response: boom
+failed to read tcp tunnel connect reply: boom
+failed to read tcp tunnel bind address: boom
+failed to read tcp tunnel auth response: boom
+failed to parse tcp tunnel auth response: boom
+failed to parse server certificate
+failed to parse aTrust server manifest: boom
+failed to parse IP tunnel auth response: boom
+failed to marshal tcp tunnel auth request: boom
+failed to marshal signed tcp tunnel auth request: boom
+failed to marshal client data: boom
+failed to marshal IP tunnel auth request: boom
+failed to get client IP: x
+failed to decode captcha image size: boom
+failed to create L3 tunnel: x
+failed to connect to aTrust server: boom
+failed to clear tcp tunnel handshake timeout: boom
+failed to acquire aTrust server manifest: boom
+error creating NIC 3: x
+encrypt RADIUS token: boom
+encode aTrust captcha response: boom
+empty image data
+decode config: boom
+decode certificate file: boom
+customSMSCheckCode failed with code 3: x
+custom DNS: host name and IP are required
+create underlay dialer: boom
+create TLS key log: boom
+connection refused
+configure aTrust login: boom
+complete trusted device challenge: boom
+complete secondary SMS challenge: boom
+complete primary SMS challenge: boom
+complete custom SMS challenge: boom
+complete aTrust captcha challenge: boom
+complete TOTP challenge: boom
+complete RADIUS challenge: boom
+complete EasyConnect captcha challenge: boom
+complete EasyConnect SMS challenge: boom
+close UDP forwarding listener failed: boom
+close TCP forwarding listener failed: boom
+close Shadowsocks UDP listener failed: boom
+close Shadowsocks TCP listener failed: boom
+close SOCKS5 listener failed: boom
+close HTTP listener failed: boom
+close DNS listener failed: boom
+client data file is required for trust/untrust device
+cert required
+captcha verification failed after 3 attempts
+captcha input timed out after x
+bindAuthDevice needs a trusted device unbound, but the server sent no trustedDeviceList
+bindAuthDevice failed with code 3: x
+bind interface "x": boom
+authentication denied
+authentication challenge timed out after x
+authentication chain exceeded 3 steps
+authentication cancelled by user
+authSms failed with code 3: x
+authConfig response missing code or isLogin
+authConfig failed with code 3
+authConfig HTTP 3
+authCheck failed with code 3: x
+auth type/login domain combination not found: auth type: x, login domain: x
+auth status 3: x
+apply failed
+android_fd TUN mode is only available on Android
+accessCheck failed with code 3: x
+aTrust session is invalid; reauthentication required
+aTrust server manifest returned HTTP status 3
+aTrust server manifest failed with code 3
+aTrust anti-MITM verification failed: server enabled verification without a certificate
+aTrust anti-MITM verification failed: response was not received over TLS
+aTrust anti-MITM verification failed: TLS peer did not provide a certificate
+aTrust anti-MITM signature verification failed: incomplete server data
+aTrust anti-MITM signature verification failed: boom
+aTrust anti-MITM signature mismatch
+aTrust anti-MITM response signature mismatch
+aTrust anti-MITM request nonce mismatch
+aTrust anti-MITM request failed: invalid response: boom
+aTrust anti-MITM request failed: generate nonce: boom
+aTrust anti-MITM request failed with HTTP status 3
+aTrust anti-MITM request detected a MITM attack
+aTrust anti-MITM request denied: session not found
+aTrust anti-MITM challenge verification failed: incomplete server data
+aTrust anti-MITM challenge verification failed: boom
+aTrust anti-MITM challenge mismatch
+aTrust anti-MITM certificate mismatch: got x
+TUN stack setup error (run as root/administrator): boom
+TOTP verification failed: 
+TOTP required
+TCP tunnel stack setup error: boom
+TCP tunnel requires an authenticated session
+TCP tunnel requires a valid IPv4 destination
+TCP tunnel x: unexpected response "x"
+TCP tunnel x: response header too large
+TCP tunnel x: read response: boom
+TCP tunnel x: boom
+SMS code verification failed: 
+SMS code required
+SMS authentication succeeded without a ticket
+SMS authentication failed with code 3: x
+RSA public key is too small
+Not implemented auth: 
+Login failed: 
+L3 tunnel not initialized
+IP tunnel authentication status 3
+IP tunnel authentication failed (code 3): x
+ECAgent request invalid: read 3 bytes: boom
+DNS server invalid
+Cert verification failed: 
+boom: authConfig code 3
+boom: authConfig HTTP 3
+boom for 4:<client-ip>:<client-port>-<dns-server>:53
+x:3, [x]: boom
+x, [x]: boom
+x is not a valid domain
+x failed with code 3: x
+VPN client setup error: complete EasyConnect captcha challenge: authentication cancelled by user
+VPN client setup error: Login failed: You are trying brute-force login on this IP address. Word verification is enabled!
+VPN client setup error: Login failed: Invalid username or password!
+VPN client setup error: Login failed: <?xml version="1.0" encoding="UTF-8"?><Auth><Result>0</Result><Note><![CDATA[Invalid username or password!]]></Note></Auth>
+VPN client setup error: Login failed: Rand code error!
+VPN client setup error: failed to connect to aTrust server: dial tcp: lookup vpn.example.edu.cn: no such host
+VPN client setup error: Post "https://rvpn.zju.edu.cn/por/login_auth.csp": dial tcp 10.0.0.1:443: i/o timeout
+listen tcp 127.0.0.1:1080: bind: address already in use
+core exited with code 2
+TUN mode needs administrator rights (accept the UAC prompt)
+wintun.dll is missing next to zjuconnect-core.exe; reinstall PureConnect
+TUN mode needs root (administrator) rights

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PureConnect
+GenericName=Campus VPN
+GenericName[zh_CN]=校园 VPN
+Comment=EasyConnect / aTrust client built on zju-connect
+Comment[zh_CN]=基于 zju-connect 的 EasyConnect / aTrust 客户端
+Exec=pureconnect
+Icon=com.taocrypt.pureconnect
+Terminal=false
+Categories=Network;
+StartupWMClass=com.taocrypt.pureconnect

@@ -1,0 +1,290 @@
+name: Build
+
+# push to main      -> build every platform, upload workflow artifacts
+# push of tag v*    -> same, then publish a GitHub Release for the tag
+# pull_request      -> build every platform (no release)
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same Flutter line the app is developed with.
+  FLUTTER_VERSION: '3.47.x'
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: android
+            core: android
+          - os: ubuntu-latest
+            target: linux
+            core: linux-amd64
+          - os: windows-latest
+            target: windows
+            core: windows-amd64
+          - os: macos-latest
+            target: macos
+            core: darwin-arm64 darwin-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # App version: the tag (v1.2.3 -> 1.2.3) on releases, pubspec otherwise.
+      # The build number is derived from it (1.2.3 -> 10203) so every release
+      # has a higher Android versionCode than the one before.
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER=$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml)
+          fi
+          if ! [[ "$VER" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::version '$VER' is not MAJOR.MINOR.PATCH"; exit 1
+          fi
+          BUILD=$(( ${BASH_REMATCH[1]} * 10000 + ${BASH_REMATCH[2]} * 100 + ${BASH_REMATCH[3]} ))
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "PureConnect $VER ($BUILD)"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: false
+      - uses: actions/setup-java@v4
+        if: matrix.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: nttld/setup-ndk@v1
+        if: matrix.target == 'android'
+        id: ndk
+        with:
+          ndk-version: r27c
+          add-to-path: false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Linux deps
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libx11-dev \
+            libayatana-appindicator3-dev dpkg-dev
+
+      # The Go core is always built here, for every target ABI (arm64 with
+      # pure Go, armeabi-v7a / x86_64 with the NDK). Nothing prebuilt is used.
+      - name: Build core
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          REQUIRE_NDK: '1'
+          CORE_VERSION: v${{ steps.ver.outputs.version }}
+        run: core/build.sh ${{ matrix.core }}
+
+      - name: Check core bundle inputs
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            windows) test -f core/dist/windows-amd64/zjuconnect-core.exe && test -f core/dist/windows-amd64/wintun.dll ;;
+            linux)   test -x core/dist/linux-amd64/zjuconnect-core ;;
+            macos)   test -x core/dist/darwin-arm64/zjuconnect-core && test -x core/dist/darwin-amd64/zjuconnect-core ;;
+            android)
+              J=android/app/src/main/jniLibs
+              for abi in arm64-v8a armeabi-v7a x86_64; do
+                test -f $J/$abi/libzjuconnect_core.so || { echo "::error::missing $abi core"; exit 1; }
+              done
+              file $J/*/libzjuconnect_core.so
+              file $J/arm64-v8a/libzjuconnect_core.so | grep -q aarch64
+              file $J/armeabi-v7a/libzjuconnect_core.so | grep -q 'ARM,'
+              file $J/x86_64/libzjuconnect_core.so | grep -q x86-64
+              ;;
+          esac
+
+      # Android signing: the release key from the repo secrets
+      # (ANDROID_KEYSTORE_BASE64 = base64 of the PKCS12 keystore,
+      # ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD).
+      # Without them (forks / PRs) a throwaway dev key is used; such APKs
+      # can't update a release install. Tag builds require the real key.
+      - name: Android signing
+        if: matrix.target == 'android'
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > android/app/release.p12
+            printf 'storeFile=release.p12\nstoreType=PKCS12\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KS_PASS" "$KEY_ALIAS" "${KEY_PASS:-$KS_PASS}" > android/key.properties
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "::error::release build without ANDROID_KEYSTORE_BASE64 secret"; exit 1
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: signing with a throwaway dev key"
+          fi
+          if [ ! -f android/app/dev-signing.keystore ]; then
+            keytool -genkeypair -keystore android/app/dev-signing.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - run: flutter pub get
+
+      - name: Build app
+        shell: bash
+        run: |
+          V="--build-name=${{ steps.ver.outputs.version }} --build-number=${{ steps.ver.outputs.build }}"
+          case "${{ matrix.target }}" in
+            android)
+              flutter build apk --release --split-per-abi $V
+              flutter build apk --release $V
+              ;;
+            *) flutter build ${{ matrix.target }} --release $V ;;
+          esac
+
+      - name: Package (Android)
+        if: matrix.target == 'android'
+        shell: bash
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          O=build/app/outputs/flutter-apk
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp $O/app-$abi-release.apk dist/PureConnect-$VER-android-$abi.apk
+          done
+          cp $O/app-release.apk dist/PureConnect-$VER-android-universal.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs dist/PureConnect-$VER-android-arm64-v8a.apk | grep -E 'Signer #1 certificate (DN|SHA-256)' || true
+          rm -f android/key.properties android/app/release.p12
+
+      - name: Package (Windows)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $rel = "build\windows\x64\runner\Release"
+          foreach ($f in "pureconnect.exe", "zjuconnect-core.exe", "wintun.dll") {
+            if (-not (Test-Path "$rel\$f")) { throw "missing $f in the Windows bundle" }
+          }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$rel\*" -DestinationPath "dist\PureConnect-$ver-windows-x64.zip" -Force
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DMyAppVersion=$ver" "/DSourceDir=$PWD\$rel" "/DOutputDir=$PWD\dist" windows\packaging\pureconnect.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+
+      - name: Package (macOS)
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          APP=build/macos/Build/Products/Release/PureConnect.app
+          test -x "$APP/Contents/Resources/zjuconnect-core"
+          lipo -info "$APP/Contents/Resources/zjuconnect-core"
+          # Ad-hoc signature over the whole bundle, core included.
+          codesign --force --deep --sign - "$APP"
+          mkdir -p dist
+          hdiutil create -volname PureConnect -srcfolder "$APP" -ov -format UDZO dist/PureConnect-$VER-macos-universal.dmg
+
+      - name: Package (Linux)
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          B=build/linux/x64/release/bundle
+          test -x "$B/pureconnect" && test -x "$B/lib/zjuconnect-core"
+          mkdir -p dist
+          tar -C build/linux/x64/release -czf dist/PureConnect-$VER-linux-x64.tar.gz --transform 's,^bundle,PureConnect,' bundle
+          D=$(mktemp -d)
+          mkdir -p $D/DEBIAN $D/opt/pureconnect $D/usr/bin $D/usr/share/applications $D/usr/share/icons/hicolor/512x512/apps
+          cp -r $B/. $D/opt/pureconnect/
+          ln -s /opt/pureconnect/pureconnect $D/usr/bin/pureconnect
+          cp linux/packaging/com.taocrypt.pureconnect.desktop $D/usr/share/applications/
+          cp assets/icon/a1.png $D/usr/share/icons/hicolor/512x512/apps/com.taocrypt.pureconnect.png
+          {
+            echo "Package: pureconnect"
+            echo "Version: $VER"
+            echo "Section: net"
+            echo "Priority: optional"
+            echo "Architecture: amd64"
+            echo "Maintainer: Taocrypt <noreply@github.com>"
+            echo "Homepage: https://github.com/Taocrypt/PureConnect"
+            echo "Depends: libgtk-3-0 | libgtk-3-0t64, libayatana-appindicator3-1"
+            echo "Recommends: pkexec | policykit-1"
+            echo "Description: PureConnect campus VPN client"
+            echo " EasyConnect / aTrust client built on zju-connect."
+          } > $D/DEBIAN/control
+          dpkg-deb --root-owner-group --build $D dist/PureConnect-$VER-linux-amd64.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PureConnect-${{ steps.ver.outputs.version }}-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Release notes
+        shell: bash
+        run: |
+          TAG="$GITHUB_REF_NAME"; VER="${TAG#v}"
+          # The "## [x.y.z]" (or "## x.y.z") section of CHANGELOG.md.
+          awk -v v="$VER" '
+            /^## / { if (on) exit; h=$0; gsub(/[\[\]]/, "", h); split(h, a, " "); if (a[2] == v) { on=1; next } }
+            on { print }
+          ' CHANGELOG.md > notes.md || true
+          if ! grep -q '[^[:space:]]' notes.md; then
+            PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+            echo "## 更新内容" > notes.md
+            if [ -n "$PREV" ]; then
+              git log --pretty='- %s' "$PREV..$TAG" >> notes.md
+            else
+              git log --pretty='- %s' "$TAG" >> notes.md
+            fi
+          fi
+          cat notes.md
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          ls -l artifacts
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --title "$TAG" --notes-file notes.md --verify-tag
+          fi

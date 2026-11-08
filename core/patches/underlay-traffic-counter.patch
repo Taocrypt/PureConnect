@@ -1,0 +1,58 @@
+diff --git a/underlay/dialer.go b/underlay/dialer.go
+index 35f69a1..bd88e78 100644
+--- a/underlay/dialer.go
++++ b/underlay/dialer.go
+@@ -156,6 +156,7 @@ func (d *Dialer) updateInterfaceName(interfaceName string) {
+ }
+ 
+ func (d *Dialer) wrapCapture(conn net.Conn) net.Conn {
++	conn = countingConn{conn}
+ 	if d.capture == nil {
+ 		return conn
+ 	}
+diff --git a/underlay/traffic.go b/underlay/traffic.go
+new file mode 100644
+index 0000000..2c106fd
+--- /dev/null
++++ b/underlay/traffic.go
+@@ -0,0 +1,40 @@
++package underlay
++
++import (
++	"net"
++	"sync/atomic"
++)
++
++var trafficTx, trafficRx atomic.Uint64
++
++// Traffic returns the bytes sent to and received from the VPN server over all
++// underlay connections since the process started (or the last ResetTraffic).
++func Traffic() (tx, rx uint64) { return trafficTx.Load(), trafficRx.Load() }
++
++// ResetTraffic zeroes the counters.
++func ResetTraffic() { trafficTx.Store(0); trafficRx.Store(0) }
++
++type countingConn struct{ net.Conn }
++
++func (c countingConn) Read(b []byte) (int, error) {
++	n, err := c.Conn.Read(b)
++	if n > 0 {
++		trafficRx.Add(uint64(n))
++	}
++	return n, err
++}
++
++func (c countingConn) Write(b []byte) (int, error) {
++	n, err := c.Conn.Write(b)
++	if n > 0 {
++		trafficTx.Add(uint64(n))
++	}
++	return n, err
++}
++
++func (c countingConn) CloseWrite() error {
++	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
++		return cw.CloseWrite()
++	}
++	return nil
++}

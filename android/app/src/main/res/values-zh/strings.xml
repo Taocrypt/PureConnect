@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notify_connecting">正在连接…</string>
+    <string name="notify_connected">已连接 %1$s</string>
+    <string name="notify_stop">断开</string>
+    <string name="notify_total">共 ↑%1$s ↓%2$s</string>
+</resources>

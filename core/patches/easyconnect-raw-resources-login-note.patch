@@ -1,0 +1,55 @@
+diff --git a/client/easyconnect/client.go b/client/easyconnect/client.go
+index 5801ffb..6ff8433 100644
+--- a/client/easyconnect/client.go
++++ b/client/easyconnect/client.go
+@@ -49,6 +49,7 @@ type Options struct {
+ }
+ 
+ type Client struct {
++	rawResources      string // raw /por/rclist.csp reply (zjuconnect-core bridge)
+ 	server            string // Example: rvpn.zju.edu.cn:443. No protocol prefix
+ 	username          string
+ 	password          string
+@@ -244,6 +245,7 @@ func (c *Client) Setup() error {
+ 			log.Printf("Error occurred while requesting resources: %v", err)
+ 		} else {
+ 			// Parse the resources
++			c.rawResources = resources
+ 			err = c.parseResources(resources)
+ 			if err != nil {
+ 				log.Printf("Error occurred while parsing resources: %v", err)
+@@ -358,3 +360,6 @@ func (c *Client) runSessionKeepAlive(ticks <-chan time.Time, requestTimeout time
+ 		}
+ 	}
+ }
++
++// RawResources returns the raw /por/rclist.csp reply received during Setup.
++func (c *Client) RawResources() string { return c.rawResources }
+diff --git a/client/easyconnect/request.go b/client/easyconnect/request.go
+index 6f26951..944cacb 100644
+--- a/client/easyconnect/request.go
++++ b/client/easyconnect/request.go
+@@ -230,7 +230,7 @@ func (c *Client) loginAuthAndPsw(graphCodeFile string) error {
+ 	}
+ 
+ 	if !strings.Contains(buf.String(), "<Result>1</Result>") {
+-		return errors.New("Login failed: " + buf.String())
++		return errors.New("Login failed: " + loginNote(buf.String()))
+ 	}
+ 
+ 	twfIDMatch := regexp.MustCompile(`<TwfID>(.*)</TwfID>`).FindSubmatch(buf.Bytes())
+@@ -727,3 +727,14 @@ func (c *Client) requestIPKeepAliveLoop() {
+ 		}
+ 	}
+ }
++
++// loginNote extracts the human readable <Note> of a failed auth reply.
++func loginNote(reply string) string {
++	if i := strings.Index(reply, "<Note><![CDATA["); i >= 0 {
++		rest := reply[i+len("<Note><![CDATA["):]
++		if j := strings.Index(rest, "]]>"); j > 0 {
++			return strings.TrimSpace(rest[:j])
++		}
++	}
++	return reply
++}
