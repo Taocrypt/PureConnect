@@ -11,6 +11,7 @@ import '../models/settings.dart';
 import '../state/providers.dart';
 import 'app_icon.dart';
 import 'desktop_window.dart';
+import 'notify.dart';
 import 'protocol.dart';
 
 /// Desktop window + tray behaviour (Windows / macOS / Linux): the tray (menu
@@ -28,6 +29,7 @@ class DesktopShell {
   StreamSubscription<TrayEvent>? _traySub;
   bool _trayShown = false;
   bool _quitting = false;
+  bool _hiddenHintShown = false;
 
   /// Actions that need the UI (password prompt, toasts); set by HomeShell.
   Future<void> Function()? onToggleConnection;
@@ -56,9 +58,14 @@ class DesktopShell {
       case 'close':
         final ref = _ref;
         if (ref != null && ref.read(settingsProvider).closeToTray && _trayShown) {
-          await DesktopWindow.hide();
+          await _hideToTray();
         } else {
           await quit();
+        }
+      case 'minimized':
+        final ref = _ref;
+        if (ref != null && ref.read(settingsProvider).minimizeToTray && _trayShown) {
+          await _hideToTray();
         }
       case 'quitRequested':
         await quit();
@@ -66,6 +73,16 @@ class DesktopShell {
         break;
     }
     return null;
+  }
+
+  /// Hides the window; the first time in a run, says where it went.
+  Future<void> _hideToTray() async {
+    await DesktopWindow.hide();
+    final ref = _ref;
+    if (_hiddenHintShown || ref == null || !ref.read(settingsProvider).notifications) return;
+    _hiddenHintShown = true;
+    final s = _s;
+    await SystemNotify.show('PureConnect', s.t('notify_hidden_to_tray'));
   }
 
   S get _s {

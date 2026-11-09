@@ -33,6 +33,7 @@ static void present_window(MyApplication* self) {
   self->start_hidden = FALSE;
   if (self->window == nullptr) return;
   gtk_widget_show(GTK_WIDGET(self->window));
+  gtk_window_deiconify(self->window);
   gtk_window_present(self->window);
 }
 
@@ -98,6 +99,17 @@ static gboolean delete_event_cb(GtkWidget* widget, GdkEvent* event,
   return TRUE;
 }
 
+// Minimised: Dart hides the window to the tray when "minimise to tray" is on.
+static gboolean window_state_cb(GtkWidget* widget, GdkEventWindowState* event,
+                                gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if ((event->changed_mask & GDK_WINDOW_STATE_ICONIFIED) &&
+      (event->new_window_state & GDK_WINDOW_STATE_ICONIFIED)) {
+    notify_dart(self, "minimized");
+  }
+  return FALSE;
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   if (self->start_hidden) return;
@@ -117,6 +129,8 @@ static void my_application_activate(GApplication* application) {
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   self->window = window;
   g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb), self);
+  g_signal_connect(window, "window-state-event", G_CALLBACK(window_state_cb),
+                   self);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu

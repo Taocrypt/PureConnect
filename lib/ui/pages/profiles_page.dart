@@ -13,6 +13,7 @@ import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
 import '../home_shell.dart' show switchProfile;
 import 'profile_edit_page.dart';
+import 'setup_guide_page.dart';
 
 class ProfilesPage extends ConsumerWidget {
   const ProfilesPage({super.key});
@@ -23,11 +24,16 @@ class ProfilesPage extends ConsumerWidget {
       title: context.tr('add_profile'),
       current: '',
       options: [
+        ('guide', context.tr('setup_guide')),
         ('custom', context.tr('custom')),
         ('clip', context.tr('import_clipboard')),
       ],
     );
     if (kind == null || !context.mounted) return;
+    if (kind == 'guide') {
+      await pushPage(context, (_) => const SetupGuidePage());
+      return;
+    }
     Profile p;
     if (kind == 'clip') {
       final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';

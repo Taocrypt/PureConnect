@@ -9,7 +9,9 @@ import '../core/desktop_shell.dart';
 import '../core/desktop_window.dart';
 import '../core/errors.dart';
 import '../core/protocol.dart';
+import '../core/system_proxy.dart';
 import '../l10n/strings.dart';
+import '../models/profile.dart';
 import '../models/settings.dart';
 import '../state/providers.dart';
 import 'kit/app_glyphs.dart';
@@ -21,7 +23,9 @@ import 'pages/logs_page.dart';
 import 'pages/profiles_page.dart';
 import 'pages/resources_page.dart';
 import 'pages/settings_page.dart';
+import 'pages/setup_guide_page.dart';
 import 'widgets/challenge_dialogs.dart';
+import 'widgets/connect_prompts.dart';
 
 enum AppTab { dashboard, profiles, resources, logs, tools }
 
@@ -58,14 +62,30 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       _surfaceCrashLog();
       if (!mounted) return;
       _attachDesktop();
-      if (ref.read(settingsProvider).autoConnect && !ref.read(coreProvider).isActive) {
-        toggleConnection(context, ref);
-      }
+      _startup();
       // Quietly look for a new release (setting, at most once a day).
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) checkForUpdate(context, ref);
       });
     });
+  }
+
+  /// Launch-time actions: the setup guide on a first run without profiles,
+  /// then connecting when "connect on launch" is on or the app was started
+  /// with `--connect`.
+  Future<void> _startup() async {
+    final settings = ref.read(settingsProvider);
+    final args = await DesktopWindow.launchArgs();
+    if (!mounted) return;
+    if (ref.read(profilesProvider).isEmpty && !settings.setupGuideShown && !args.contains('--hidden')) {
+      ref.read(settingsProvider.notifier).update((s) => s.setupGuideShown = true);
+      await pushPage(context, (_) => const SetupGuidePage());
+      if (!mounted) return;
+    }
+    final connect = settings.autoConnect || args.contains('--connect');
+    if (connect && ref.read(profilesProvider).isNotEmpty && !ref.read(coreProvider).isActive) {
+      await toggleConnection(context, ref);
+    }
   }
 
   /// Desktop: tray / menu-bar icon, close-to-tray and clean quit.
@@ -266,16 +286,48 @@ Future<void> switchProfile(BuildContext context, WidgetRef ref, String id) async
   await ctl.connect(sudoPassword: password);
 }
 
-/// Starts or stops the core; asks for the admin password first when the
-/// desktop TUN mode needs it (macOS, or Linux without pkexec).
+/// Starts or stops the core. Before connecting: asks for a user name /
+/// password (or SMS phone number) the profile does not store, confirms
+/// replacing another app's system proxy, and asks for the admin password when
+/// the desktop TUN mode needs it (macOS, or Linux without pkexec).
 Future<void> toggleConnection(BuildContext context, WidgetRef ref) async {
   final ctl = ref.read(coreProvider.notifier);
   if (ref.read(coreProvider).isActive) {
     await ctl.disconnect();
     return;
   }
-  String? password;
   final s = ref.read(settingsProvider);
+  Profile? oneTime;
+  final profile = ref.read(selectedProfileProvider);
+  if (profile != null) {
+    final missing = missingLogin(profile);
+    if (missing != null) {
+      final a = await askLogin(context, profile, missing);
+      if (a == null || !context.mounted) return;
+      final p = profile.copy();
+      if (missing == 'phone') {
+        p.phone = a.phone;
+      } else {
+        p.username = a.username;
+        p.password = a.password;
+      }
+      if (a.remember) {
+        ref.read(profilesProvider.notifier).upsert(p);
+      } else {
+        oneTime = p;
+      }
+    }
+  }
+  if (s.trafficMode == TrafficMode.systemProxy && SystemProxy.supported && s.warnProxyOverride) {
+    final other = await SystemProxy.foreignProxy(ref.read(dataDirProvider));
+    if (other != null) {
+      if (!context.mounted) return;
+      final dontAsk = await confirmProxyOverride(context, other);
+      if (dontAsk == null) return;
+      if (dontAsk) ref.read(settingsProvider.notifier).update((x) => x.warnProxyOverride = false);
+    }
+  }
+  String? password;
   final needsPassword = s.trafficMode == TrafficMode.tun &&
       await DesktopCoreBackend.needsSudoPassword();
   if (needsPassword) {
@@ -283,5 +335,5 @@ Future<void> toggleConnection(BuildContext context, WidgetRef ref) async {
     password = await askPassword(context, context.tr('sudo_title'), context.tr('sudo_hint'));
     if (password == null) return;
   }
-  await ctl.connect(sudoPassword: password);
+  await ctl.connect(sudoPassword: password, profileOverride: oneTime);
 }

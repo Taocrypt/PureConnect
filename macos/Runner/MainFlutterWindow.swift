@@ -61,6 +61,8 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
         DispatchQueue.main.async {
           (NSApp.delegate as? AppDelegate)?.finishQuit()
         }
+      case "launchArgs":
+        result(Array(CommandLine.arguments.dropFirst()))
       case "setDockIconVisible":
         let visible = call.arguments as? Bool ?? true
         NSApp.setActivationPolicy(visible ? .regular : .accessory)
@@ -100,6 +102,11 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
 
   func notify(_ method: String) {
     windowChannel?.invokeMethod(method, arguments: nil)
+  }
+
+  func windowDidMiniaturize(_ notification: Notification) {
+    // Dart hides the window to the menu bar when "minimise to tray" is on.
+    notify("minimized")
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {

@@ -9,11 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'core/app_icon.dart';
+import 'core/desktop_window.dart';
 import 'core/system_proxy.dart';
 import 'state/providers.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  DesktopWindow.mainArgs = args;
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   final prefs = await SharedPreferences.getInstance();
   final dataDir = await resolveDataDir();

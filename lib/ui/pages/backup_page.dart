@@ -7,6 +7,7 @@ import 'package:prism_ui/prism_ui.dart';
 
 import '../../core/backup.dart';
 import '../../l10n/strings.dart';
+import '../../models/settings.dart';
 import '../../state/providers.dart';
 import '../kit/app_glyphs.dart';
 import '../kit/common.dart';
@@ -160,6 +161,21 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     }
   }
 
+  /// Every app setting back to its default; profiles and the selected
+  /// profile stay.
+  Future<void> _resetSettings() async {
+    final ok = await confirm(context,
+        title: context.tr('reset_settings'), message: context.tr('reset_settings_confirm'), destructive: true);
+    if (!ok || !mounted) return;
+    final old = ref.read(settingsProvider);
+    ref.read(settingsProvider.notifier).replace(AppSettings(
+          selectedProfileId: old.selectedProfileId,
+          setupGuideShown: true,
+          shareWarningSeen: old.shareWarningSeen,
+        ));
+    showToast(context, context.tr('reset_settings_done'), level: BannerLevel.success);
+  }
+
   Future<void> _backupLocal() => _run(context.tr('backup'), context.tr('backup_success'), () async {
         final res = await FilePicker.saveFile(
           fileName: backupFileName(),
@@ -291,6 +307,15 @@ class _BackupPageState extends ConsumerState<BackupPage> {
                 current: prefs.strategy);
             if (v != null) _setPrefs((p) => p.copyWith(strategy: v));
           },
+        ),
+      ]),
+      SettingsGroup(children: [
+        SettingsTile(
+          glyph: AppGlyphs.clearAll,
+          title: context.tr('reset_settings'),
+          subtitle: context.tr('reset_settings_desc'),
+          destructive: true,
+          onTap: _resetSettings,
         ),
       ]),
     ]);

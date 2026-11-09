@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/profile.dart';
 import '../models/settings.dart';
+import 'extra_args.dart';
 
 /// Builds the JSON config understood by zjuconnect-core. Keys are exactly the
 /// snake_case keys of upstream zju-connect's config.toml.
@@ -12,6 +13,7 @@ Map<String, dynamic> buildCoreConfig({
   required AppSettings settings,
   required String dataDir,
   required bool android,
+  DateTime? now,
 }) {
   final host = settings.allowLan ? '0.0.0.0' : '127.0.0.1';
   // Android VPN mode uses the platform TUN; desktop TUN uses upstream tun_mode.
@@ -67,6 +69,10 @@ Map<String, dynamic> buildCoreConfig({
     if (settings.bindInterface.isNotEmpty) 'bind_interface': settings.bindInterface,
     'auto_detect_interface': settings.autoDetectInterface,
     'debug_dump': settings.debugDump,
+    if (settings.debugPcap)
+      'debug_pcap_file': p.join(debugDir(dataDir), '${_stamp(now)}.pcap'),
+    if (settings.debugTlsKeyLog)
+      'debug_tls_log_file': p.join(debugDir(dataDir), '${_stamp(now)}.keys.log'),
   };
 
   if (profile.protocol == VpnProtocol.easyconnect) {
@@ -96,7 +102,19 @@ Map<String, dynamic> buildCoreConfig({
       'session_refresh_interval': settings.sessionRefreshInterval,
     });
   }
+  // Extra options typed by the user win over the app's own values; invalid
+  // ones are reported before connecting (CoreController.connect).
+  if (settings.extraArgs.trim().isNotEmpty) parseExtraArgs(settings.extraArgs).applyTo(c);
   return c;
+}
+
+/// Where PCAP / TLS key-log files go (one pair per connection).
+String debugDir(String dataDir) => p.join(dataDir, 'debug');
+
+String _stamp(DateTime? now) {
+  final t = now ?? DateTime.now();
+  String two(int v) => v.toString().padLeft(2, '0');
+  return 'pureconnect-${t.year}${two(t.month)}${two(t.day)}-${two(t.hour)}${two(t.minute)}${two(t.second)}';
 }
 
 /// Where the aTrust client data of [profile] is persisted.

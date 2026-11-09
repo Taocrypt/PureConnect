@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -10,6 +11,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/backend.dart';
 import '../core/backup.dart';
 import '../core/config_builder.dart';
+import '../core/errors.dart';
+import '../core/extra_args.dart';
+import '../core/notify.dart';
+import '../core/updater.dart' show currentAppVersion;
+import '../l10n/strings.dart';
 import '../core/protocol.dart';
 import '../core/system_proxy.dart';
 import '../models/profile.dart';
@@ -344,7 +350,7 @@ final proxyHealthProvider = NotifierProvider<ProxyHealthNotifier, ProxyHealth?>(
 /// Settings that only take effect on the next connection, as JSON.
 String connectionSettingsKey(AppSettings s) {
   final j = s.toJson();
-  for (final k in const ['favoriteResources', 'browserPackage', 'themeMode', 'seedColor', 'appIcon', 'useDynamicColor', 'locale', 'autoConnect', 'closeToTray', 'silentStart', 'hideDockIcon', 'shareWarningSeen', 'autoCheckUpdate']) {
+  for (final k in const ['favoriteResources', 'browserPackage', 'themeMode', 'seedColor', 'appIcon', 'useDynamicColor', 'locale', 'autoConnect', 'closeToTray', 'silentStart', 'hideDockIcon', 'shareWarningSeen', 'autoCheckUpdate', 'autoReconnect', 'reconnectDelay', 'notifications', 'minimizeToTray', 'warnProxyOverride', 'setupGuideShown']) {
     j.remove(k);
   }
   return jsonEncode(j);
@@ -446,6 +452,7 @@ class CoreStatus {
     this.profileName = '',
     this.trafficMode,
     this.challenges = const [],
+    this.reconnectAt,
   });
 
   final CoreState state;
@@ -457,10 +464,14 @@ class CoreStatus {
   final TrafficMode? trafficMode;
   final List<Challenge> challenges;
 
+  /// Auto reconnect is waiting until this time (state stays error/stopped).
+  final DateTime? reconnectAt;
+
   bool get isBusy =>
       state == CoreState.starting || state == CoreState.connecting || state == CoreState.stopping;
   bool get isConnected => state == CoreState.connected;
-  bool get isActive => isBusy || isConnected;
+  /// Busy, connected, or waiting to reconnect (the button then disconnects).
+  bool get isActive => isBusy || isConnected || reconnectAt != null;
 
   CoreStatus copyWith({
     CoreState? state,
@@ -471,6 +482,7 @@ class CoreStatus {
     String? profileName,
     Object? trafficMode = _keep,
     List<Challenge>? challenges,
+    Object? reconnectAt = _keep,
   }) =>
       CoreStatus(
         state: state ?? this.state,
@@ -481,6 +493,7 @@ class CoreStatus {
         profileName: profileName ?? this.profileName,
         trafficMode: trafficMode == _keep ? this.trafficMode : trafficMode as TrafficMode?,
         challenges: challenges ?? this.challenges,
+        reconnectAt: reconnectAt == _keep ? this.reconnectAt : reconnectAt as DateTime?,
       );
 
   static const _keep = Object();
@@ -491,6 +504,37 @@ final backendProvider = Provider<CoreBackend>((ref) => CoreBackend.create());
 class CoreController extends Notifier<CoreStatus> {
   StreamSubscription<CoreEvent>? _sub;
   bool _systemProxySet = false;
+
+  // Auto reconnect / disconnect notification bookkeeping.
+  bool _userStop = false;
+  bool _wasConnected = false;
+  int _reconnectAttempts = 0;
+  Timer? _reconnectTimer;
+  /// Linux `sudo -S` password of this run, kept in memory only so an
+  /// automatic reconnect in TUN mode can start the core again.
+  String? _sudoPassword;
+  static const maxReconnectAttempts = 20;
+
+  /// Errors worth retrying: the tunnel or network went away, not the login.
+  static const reconnectableErrors = {
+    'session_expired', 'shutdown', 'reconnect_later', 'tunnel', 'network', 'dns', 'no_node', 'core_crashed',
+  };
+
+  static bool isReconnectable(String? error) {
+    if (error == null) return true;
+    final key = errorKey(error);
+    return key == null || reconnectableErrors.contains(key);
+  }
+
+  S get _s {
+    final l = ref.read(settingsProvider).locale;
+    final lang = l.isNotEmpty ? l : PlatformDispatcher.instance.locale.languageCode;
+    return S(lang == 'zh' ? 'zh' : 'en');
+  }
+
+  void _notify(String title, String body) {
+    if (ref.read(settingsProvider).notifications) SystemNotify.show(title, body);
+  }
 
   @override
   CoreStatus build() {
@@ -518,6 +562,8 @@ class CoreController extends Notifier<CoreStatus> {
       case StateEvent(state: final s, :final error):
         if (s == CoreState.connecting) ref.read(trafficProvider.notifier).set(TrafficStats.zero);
         if (s == CoreState.connected) {
+          _wasConnected = true;
+          _reconnectAttempts = 0;
           state = state.copyWith(state: s, error: null, startedAt: state.startedAt ?? DateTime.now());
           _applySystemProxy();
         } else if (s == CoreState.error) {
@@ -561,6 +607,7 @@ class CoreController extends Notifier<CoreStatus> {
   }
 
   void _onStopped({bool keepError = false}) {
+    final error = keepError ? state.error : null;
     _clearSystemProxy();
     ref.read(flowsProvider.notifier).set(const []);
     ref.read(trafficProvider.notifier).set(TrafficStats.zero);
@@ -569,9 +616,62 @@ class CoreController extends Notifier<CoreStatus> {
     ref.read(proxyHealthProvider.notifier).set(null);
     state = CoreStatus(
       state: keepError ? CoreState.error : CoreState.stopped,
-      error: keepError ? state.error : null,
+      error: error,
       version: state.version,
     );
+    _afterDrop(error);
+  }
+
+  /// The session ended without the user asking: notify, and reconnect when
+  /// that is turned on and the cause is one a retry can fix.
+  void _afterDrop(String? error) {
+    if (_userStop || _reconnectTimer != null) return;
+    final wasConnected = _wasConnected;
+    final retrying = _reconnectAttempts > 0;
+    _wasConnected = false;
+    if (!wasConnected && !retrying) return;
+    final settings = ref.read(settingsProvider);
+    final s = _s;
+    final reason = error == null ? '' : humanizeErrorIn(s.lang, error);
+    final canRetry = settings.autoReconnect &&
+        isReconnectable(error) &&
+        _reconnectAttempts < maxReconnectAttempts &&
+        ref.read(selectedProfileProvider) != null;
+    if (!canRetry) {
+      _reconnectAttempts = 0;
+      if (wasConnected) _notify(s.t('notify_dropped'), reason);
+      return;
+    }
+    final delay = settings.reconnectDelay.clamp(1, 3600);
+    _reconnectAttempts++;
+    final at = DateTime.now().add(Duration(seconds: delay));
+    state = state.copyWith(reconnectAt: at);
+    final msg = s.t('notify_reconnecting', {'s': '$delay'});
+    _log('warning', '$msg ($_reconnectAttempts/$maxReconnectAttempts)');
+    if (wasConnected) _notify(s.t('notify_dropped'), reason.isEmpty ? msg : '$reason\n$msg');
+    _reconnectTimer = Timer(Duration(seconds: delay), () {
+      _reconnectTimer = null;
+      if (_userStop || state.reconnectAt == null) return;
+      state = state.copyWith(reconnectAt: null);
+      connect(sudoPassword: _sudoPassword, reconnect: true);
+    });
+  }
+
+  /// The core opens PCAP / TLS key-log files but does not create folders.
+  void _ensureDebugDir() {
+    final s = ref.read(settingsProvider);
+    if (!s.debugPcap && !s.debugTlsKeyLog) return;
+    try {
+      Directory(debugDir(ref.read(dataDirProvider))).createSync(recursive: true);
+    } catch (_) {}
+  }
+
+  /// Stops a pending automatic reconnect.
+  void cancelReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnectAttempts = 0;
+    if (state.reconnectAt != null) state = state.copyWith(reconnectAt: null);
   }
 
   Future<void> _applySystemProxy() async {
@@ -580,7 +680,11 @@ class CoreController extends Notifier<CoreStatus> {
     if (s.httpPort <= 0 && s.socksPort <= 0) return;
     try {
       _systemProxySet = true;
-      await SystemProxy.enable(dataDir: ref.read(dataDirProvider), httpPort: s.httpPort, socksPort: s.socksPort);
+      await SystemProxy.enable(
+          dataDir: ref.read(dataDirProvider),
+          httpPort: s.httpPort,
+          socksPort: s.socksPort,
+          extraBypass: s.systemProxyBypassList);
       _log('info', 'System proxy enabled');
     } catch (e) {
       _log('warning', 'System proxy: $e');
@@ -594,9 +698,20 @@ class CoreController extends Notifier<CoreStatus> {
     _log('info', 'System proxy restored');
   }
 
-  Future<void> connect({String? sudoPassword}) async {
+  /// Credentials typed at connect time and not saved (kept for reconnects).
+  Profile? _oneTimeProfile;
+
+  Future<void> connect({String? sudoPassword, bool reconnect = false, Profile? profileOverride}) async {
+    if (!reconnect) {
+      cancelReconnect();
+      _oneTimeProfile = profileOverride;
+    }
     if (state.isActive) return;
-    final profile = ref.read(selectedProfileProvider);
+    _userStop = false;
+    _wasConnected = false;
+    if (sudoPassword != null) _sudoPassword = sudoPassword;
+    final selected = ref.read(selectedProfileProvider);
+    final profile = _oneTimeProfile != null && _oneTimeProfile!.id == selected?.id ? _oneTimeProfile : selected;
     if (profile == null) {
       state = state.copyWith(state: CoreState.error, error: 'No profile selected');
       return;
@@ -605,6 +720,16 @@ class CoreController extends Notifier<CoreStatus> {
     final dataDir = ref.read(dataDirProvider);
     final android = Platform.isAndroid;
     final tun = settings.trafficMode == TrafficMode.tun;
+    if (settings.extraArgs.trim().isNotEmpty) {
+      final errs = parseExtraArgs(settings.extraArgs).errors;
+      if (errs.isNotEmpty) {
+        final msg = 'config: extra options: ${errs.join('; ')}';
+        state = state.copyWith(state: CoreState.error, error: msg);
+        _log('error', msg);
+        return;
+      }
+    }
+    _ensureDebugDir();
     final config = buildCoreConfig(
         profile: profile, settings: settings, dataDir: dataDir, android: android);
     ref.read(appliedSettingsProvider.notifier).set(connectionSettingsKey(settings));
@@ -614,6 +739,10 @@ class CoreController extends Notifier<CoreStatus> {
       profileName: profile.name,
       trafficMode: settings.trafficMode,
     );
+    if (!reconnect) {
+      final v = await currentAppVersion().catchError((_) => '');
+      _log('info', 'PureConnect ${v.isEmpty ? '' : 'v$v '}on ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+    }
     _log('info', 'Connecting to ${profile.effectiveServer} (${profile.protocol.name}, ${settings.trafficMode.name})');
     try {
       await ref.read(backendProvider).start(
@@ -629,7 +758,14 @@ class CoreController extends Notifier<CoreStatus> {
   }
 
   Future<void> disconnect() async {
+    _userStop = true;
+    final pending = state.reconnectAt != null;
+    cancelReconnect();
     if (state.state == CoreState.idle || state.state == CoreState.stopped) return;
+    if (pending && state.state == CoreState.error) {
+      state = CoreStatus(state: CoreState.stopped, version: state.version);
+      return;
+    }
     for (final c in state.challenges) {
       ref.read(backendProvider).respond(c.id, const ChallengeAnswer.cancelled());
     }
@@ -668,6 +804,7 @@ class CoreController extends Notifier<CoreStatus> {
 
   /// aTrust: list the auth methods the server offers.
   Future<ResultEvent> fetchAuthInfo(Profile profile) {
+    _ensureDebugDir();
     final cfg = buildCoreConfig(
         profile: profile,
         settings: ref.read(settingsProvider),
@@ -678,6 +815,7 @@ class CoreController extends Notifier<CoreStatus> {
 
   /// aTrust: trust / untrust this device (needs saved client data).
   Future<ResultEvent> setTrusted(Profile profile, bool trust) {
+    _ensureDebugDir();
     final cfg = buildCoreConfig(
         profile: profile,
         settings: ref.read(settingsProvider),

@@ -131,6 +131,9 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "notify" -> result.success(runCatching {
+                    showAlert(call.argument<String>("title") ?: "PureConnect", call.argument<String>("body") ?: "")
+                }.isSuccess)
                 "supportedAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
                 "installApk" -> result.success(installApk(call.argument<String>("path") ?: ""))
                 "launcherIcon" -> result.success(currentLauncherIcon())
@@ -236,6 +239,28 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** One-off alert (unexpected disconnect, reconnecting) on its own channel. */
+    private fun showAlert(title: String, body: String) {
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(ALERT_CHANNEL) == null) {
+            nm.createNotificationChannel(android.app.NotificationChannel(
+                ALERT_CHANNEL, getString(R.string.notify_alerts), android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val open = android.app.PendingIntent.getActivity(this, 2, Intent(this, MainActivity::class.java),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = androidx.core.app.NotificationCompat.Builder(this, ALERT_CHANNEL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        nm.notify(ALERT_ID, n)
+    }
+
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -264,6 +289,8 @@ class MainActivity : FlutterActivity() {
         const val REQ_VPN = 0x5650
         const val REQ_VPN_PROBE = 0x5651
         const val REQ_NOTIFY = 0x4e54
+        const val ALERT_CHANNEL = "alerts"
+        const val ALERT_ID = 0x414c
     }
 
     private val launcherIcons = listOf("a1", "a2", "b1", "b2")

@@ -4,4 +4,5 @@
     <string name="notify_connected">已连接 %1$s</string>
     <string name="notify_stop">断开</string>
     <string name="notify_total">共 ↑%1$s ↓%2$s</string>
+    <string name="notify_alerts">提醒</string>
 </resources>

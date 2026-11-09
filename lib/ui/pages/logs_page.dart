@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,6 +54,23 @@ class _LogsPageState extends ConsumerState<LogsPage> {
           onPressed: () {
             Clipboard.setData(ClipboardData(text: shown.map((e) => '${_ts(e.time)} [${e.level}] ${e.message}').join('\n')));
             showToast(context, context.tr('copied'), level: BannerLevel.success);
+          },
+        ),
+        HeaderAction(
+          glyph: AppGlyphs.export,
+          tooltip: context.tr('export_logs'),
+          onPressed: () async {
+            final text = logs.map((e) => '${_ts(e.time)} [${e.level}] ${e.message}').join('\n');
+            try {
+              final r = await FilePicker.saveFile(
+                fileName: 'pureconnect-${DateTime.now().millisecondsSinceEpoch ~/ 1000}.log',
+                bytes: Uint8List.fromList(utf8.encode('$text\n')),
+                mimeType: 'text/plain',
+              );
+              if (r != null && context.mounted) showToast(context, context.tr('saved'), level: BannerLevel.success);
+            } catch (e) {
+              if (context.mounted) showToast(context, '$e', level: BannerLevel.error);
+            }
           },
         ),
         HeaderAction(glyph: AppGlyphs.clearAll, tooltip: context.tr('clear'), onPressed: ref.read(logsProvider.notifier).clear),

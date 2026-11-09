@@ -1,12 +1,17 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/widgets.dart';
+import 'package:path/path.dart' as p;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/app_icon.dart';
 import '../../core/autostart.dart';
+import '../../core/config_builder.dart' show debugDir;
+import '../../core/extra_args.dart';
+import '../../core/system_proxy.dart';
 import '../../core/desktop_window.dart';
 import '../../core/proxy_probe.dart';
 import '../../core/updater.dart';
@@ -81,6 +86,21 @@ class SettingsPage extends ConsumerWidget {
             chevron: true,
             onTap: () => _open(context, context.tr('advanced'), () => const _AdvancedSettings()),
           ),
+          SwitchTile(
+            glyph: AppGlyphs.sync,
+            title: context.tr('auto_reconnect'),
+            subtitle: context.tr('auto_reconnect_desc'),
+            value: s.autoReconnect,
+            onChanged: (v) => ref.read(settingsProvider.notifier).update((x) => x.autoReconnect = v),
+          ),
+          if (s.autoReconnect)
+            IntTile(
+              title: context.tr('reconnect_delay'),
+              value: s.reconnectDelay,
+              min: 1,
+              max: 3600,
+              onChanged: (v) => ref.read(settingsProvider.notifier).update((x) => x.reconnectDelay = v),
+            ),
         ]),
         // Rules: per-domain / per-port lists the user maintains.
         SettingsGroup(title: context.tr('section_rules'), children: [
@@ -209,8 +229,32 @@ class _AdvancedSettings extends ConsumerWidget {
         IntTile(title: context.tr('best_nodes_interval'), value: s.updateBestNodesInterval, max: 86400, onChanged: (v) => n.update((x) => x.updateBestNodesInterval = v)),
         IntTile(title: context.tr('session_refresh_interval'), value: s.sessionRefreshInterval, max: 86400, onChanged: (v) => n.update((x) => x.sessionRefreshInterval = v)),
       ]),
-      SettingsGroup(children: [
+      SettingsGroup(title: context.tr('extra_args'), footer: context.tr('extra_args_hint'), children: [
+        SettingsTile(
+          title: context.tr('extra_args'),
+          subtitle: s.extraArgs.trim().isEmpty ? '-disable-multi-line -dns-ttl 600' : s.extraArgs.trim().replaceAll('\n', ' '),
+          chevron: true,
+          onTap: () => _editExtraArgs(context, ref),
+        ),
+      ]),
+      SettingsGroup(title: context.tr('debug'), footer: context.tr('debug_warning'), children: [
         SwitchTile(title: context.tr('debug_dump'), value: s.debugDump, onChanged: (v) => n.update((x) => x.debugDump = v)),
+        SwitchTile(
+            title: context.tr('debug_pcap'),
+            subtitle: context.tr('debug_pcap_desc'),
+            value: s.debugPcap,
+            onChanged: (v) => n.update((x) => x.debugPcap = v)),
+        SwitchTile(
+            title: context.tr('debug_tls_keylog'),
+            subtitle: context.tr('debug_tls_keylog_desc'),
+            value: s.debugTlsKeyLog,
+            onChanged: (v) => n.update((x) => x.debugTlsKeyLog = v)),
+        SettingsTile(
+          title: context.tr('debug_files'),
+          subtitle: context.tr('debug_files_desc'),
+          chevron: true,
+          onTap: () => pushPage(context, (_) => AppPage(canPop: true, title: context.tr('debug_files'), body: const DebugFilesPage())),
+        ),
       ]),
     ]);
   }
@@ -273,6 +317,21 @@ class _DesktopSettingsState extends ConsumerState<_DesktopSettings> {
         value: s.closeToTray,
         onChanged: (v) => n.update((x) => x.closeToTray = v),
       ),
+      SwitchTile(
+        glyph: AppGlyphs.eyeOff,
+        title: context.tr('minimize_to_tray'),
+        subtitle: context.tr('minimize_to_tray_desc'),
+        value: s.minimizeToTray,
+        onChanged: (v) => n.update((x) => x.minimizeToTray = v),
+      ),
+      SettingsTile(
+        glyph: AppGlyphs.connections,
+        title: context.tr('system_proxy'),
+        subtitle: context.tr('system_proxy_desc'),
+        chevron: true,
+        onTap: () => pushPage(
+            context, (_) => AppPage(canPop: true, title: context.tr('system_proxy'), body: const _SystemProxySettings())),
+      ),
       if (Platform.isMacOS)
         SwitchTile(
           glyph: AppGlyphs.iconTile,
@@ -285,6 +344,170 @@ class _DesktopSettingsState extends ConsumerState<_DesktopSettings> {
           },
         ),
     ]);
+  }
+}
+
+/// Desktop system proxy: extra exclusions, the "replace another app's
+/// proxy?" prompt, and a manual clean-up.
+class _SystemProxySettings extends ConsumerWidget {
+  const _SystemProxySettings();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(settingsProvider);
+    final n = ref.read(settingsProvider.notifier);
+    return PageList(children: [
+      SettingsGroup(footer: context.tr('proxy_bypass_footer'), children: [
+        TextTile(
+          title: context.tr('proxy_bypass'),
+          value: s.systemProxyBypass,
+          hint: '*.example.com;192.0.2.*',
+          onChanged: (v) => n.update((x) => x.systemProxyBypass = v),
+        ),
+      ]),
+      SettingsGroup(children: [
+        SwitchTile(
+          title: context.tr('warn_proxy_override'),
+          subtitle: context.tr('warn_proxy_override_desc'),
+          value: s.warnProxyOverride,
+          onChanged: (v) => n.update((x) => x.warnProxyOverride = v),
+        ),
+        SettingsTile(
+          title: context.tr('clear_system_proxy'),
+          subtitle: context.tr('clear_system_proxy_desc'),
+          destructive: true,
+          onTap: () async {
+            final ok = await confirm(context,
+                title: context.tr('clear_system_proxy'), message: context.tr('clear_system_proxy_confirm'), destructive: true);
+            if (!ok) return;
+            await SystemProxy.clear(ref.read(dataDirProvider));
+            if (context.mounted) showToast(context, context.tr('clear_system_proxy_done'), level: BannerLevel.success);
+          },
+        ),
+      ]),
+    ]);
+  }
+}
+
+/// PCAP / TLS key-log files written by the core (one pair per connection).
+class DebugFilesPage extends ConsumerStatefulWidget {
+  const DebugFilesPage({super.key});
+
+  @override
+  ConsumerState<DebugFilesPage> createState() => _DebugFilesPageState();
+}
+
+class _DebugFilesPageState extends ConsumerState<DebugFilesPage> {
+  List<File> _files = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Directory get _dir => Directory(debugDir(ref.read(dataDirProvider)));
+
+  void _load() {
+    try {
+      final l = _dir.existsSync() ? _dir.listSync().whereType<File>().toList() : <File>[];
+      l.sort((a, b) => b.path.compareTo(a.path));
+      setState(() => _files = l);
+    } catch (_) {}
+  }
+
+  Future<void> _export(File f) async {
+    try {
+      final r = await FilePicker.saveFile(fileName: p.basename(f.path), bytes: await f.readAsBytes());
+      if (r != null && mounted) showToast(context, context.tr('saved'), level: BannerLevel.success);
+    } catch (e) {
+      if (mounted) showToast(context, '$e', level: BannerLevel.error);
+    }
+  }
+
+  String _size(int b) => b < 1024 ? '$b B' : b < 1 << 20 ? '${(b / 1024).toStringAsFixed(1)} KB' : '${(b / (1 << 20)).toStringAsFixed(1)} MB';
+
+  @override
+  Widget build(BuildContext context) {
+    return PageList(children: [
+      SettingsGroup(children: [
+        if (_files.isEmpty) SettingsTile(title: context.tr('debug_files_empty')),
+        for (final f in _files)
+          SettingsTile(
+            glyph: AppGlyphs.logs,
+            title: p.basename(f.path),
+            subtitle: _size(f.existsSync() ? f.lengthSync() : 0),
+            trailing: GlyphIcon(AppGlyphs.openExternal, size: 18, color: context.colorScheme.onSurfaceVariant),
+            onTap: () => _export(f),
+          ),
+      ]),
+      SettingsGroup(children: [
+        if (DesktopWindow.isDesktop)
+          SettingsTile(
+            glyph: AppGlyphs.openExternal,
+            title: context.tr('open_folder'),
+            onTap: () {
+              _dir.createSync(recursive: true);
+              launchUrl(Uri.directory(_dir.path));
+            },
+          ),
+        SettingsTile(
+          glyph: AppGlyphs.clearAll,
+          title: context.tr('delete_all'),
+          destructive: true,
+          onTap: _files.isEmpty
+              ? null
+              : () async {
+                  final ok = await confirm(context, title: context.tr('delete_all'), destructive: true);
+                  if (!ok) return;
+                  for (final f in _files) {
+                    try {
+                      f.deleteSync();
+                    } catch (_) {}
+                  }
+                  _load();
+                },
+        ),
+      ]),
+    ]);
+  }
+}
+
+/// Multi-line editor for [AppSettings.extraArgs]; warns about options the
+/// parser does not accept (they would stop the next connection).
+Future<void> _editExtraArgs(BuildContext context, WidgetRef ref) async {
+  final c = TextEditingController(text: ref.read(settingsProvider).extraArgs);
+  final v = await showFloatingDialog<String>(
+    context: context,
+    child: Builder(
+      builder: (ctx) => AlertDialog(
+        title: ctx.tr('extra_args'),
+        hasFields: true,
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: Text(ctx.tr('ok'))),
+        ],
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
+          Text(ctx.tr('extra_args_hint'), style: DashboardText.label(ctx)),
+          TextField(
+            controller: c,
+            autofocus: true,
+            autocorrect: false,
+            minLines: 3,
+            maxLines: 8,
+            keyboardType: TextInputType.multiline,
+            decoration: const InputDecoration(hintText: '-disable-multi-line\n-dns-ttl 600'),
+          ),
+        ]),
+      ),
+    ),
+  );
+  if (v == null || !context.mounted) return;
+  final text = v.trim();
+  ref.read(settingsProvider.notifier).update((x) => x.extraArgs = text);
+  final errs = parseExtraArgs(text).errors;
+  if (errs.isNotEmpty) {
+    await notice(context, title: context.tr('extra_args'), message: context.tr('extra_args_invalid', {'e': errs.join('\n')}));
   }
 }
 
@@ -333,6 +556,13 @@ class _AppSettings extends ConsumerWidget {
         subtitle: context.tr('auto_connect_desc'),
         value: s.autoConnect,
         onChanged: (v) => n.update((x) => x.autoConnect = v),
+      ),
+      SwitchTile(
+        glyph: AppGlyphs.info,
+        title: context.tr('notifications'),
+        subtitle: context.tr('notifications_desc'),
+        value: s.notifications,
+        onChanged: (v) => n.update((x) => x.notifications = v),
       ),
       if (Platform.isAndroid)
         FutureBuilder<String?>(

@@ -95,6 +95,16 @@ class AppSettings {
     this.silentStart = false,
     this.hideDockIcon = false,
     this.autoCheckUpdate = true,
+    this.autoReconnect = false,
+    this.reconnectDelay = 5,
+    this.notifications = true,
+    this.minimizeToTray = false,
+    this.systemProxyBypass = '',
+    this.warnProxyOverride = true,
+    this.debugPcap = false,
+    this.debugTlsKeyLog = false,
+    this.extraArgs = '',
+    this.setupGuideShown = false,
     this.selectedProfileId,
   })  : trafficMode = trafficMode ?? defaultTrafficMode,
         portForwards = portForwards ?? [],
@@ -164,7 +174,35 @@ class AppSettings {
   bool hideDockIcon;
   /// Check GitHub Releases for a new version on launch (at most once a day).
   bool autoCheckUpdate;
+  /// Reconnect by itself after the tunnel drops (network / session errors,
+  /// never wrong credentials), after [reconnectDelay] seconds.
+  bool autoReconnect;
+  int reconnectDelay;
+  /// System notifications: unexpected disconnect, reconnecting, hidden to tray.
+  bool notifications;
+  /// Desktop: minimising the window hides it to the tray.
+  bool minimizeToTray;
+  /// Desktop: extra system-proxy exclusions (`;`, `,` or newline separated),
+  /// added to the built-in local / private ranges.
+  String systemProxyBypass;
+  /// Desktop: ask before replacing a system proxy another app has set.
+  bool warnProxyOverride;
+  /// Save reconstructed VPN traffic as PCAP (`debug_pcap_file`).
+  bool debugPcap;
+  /// Save TLS session secrets in NSS key-log format (`debug_tls_log_file`).
+  bool debugTlsKeyLog;
+  /// Extra zju-connect command-line style options (see core/extra_args.dart).
+  String extraArgs;
+  /// The first-launch setup guide has been offered once.
+  bool setupGuideShown;
   String? selectedProfileId;
+
+  /// [systemProxyBypass] as a list.
+  List<String> get systemProxyBypassList => systemProxyBypass
+      .split(RegExp(r'[;,\s]+'))
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
 
   AppSettings copy() => AppSettings.fromJson(toJson());
 
@@ -212,6 +250,16 @@ class AppSettings {
         'silentStart': silentStart,
         'hideDockIcon': hideDockIcon,
         'autoCheckUpdate': autoCheckUpdate,
+        'autoReconnect': autoReconnect,
+        'reconnectDelay': reconnectDelay,
+        'notifications': notifications,
+        'minimizeToTray': minimizeToTray,
+        'systemProxyBypass': systemProxyBypass,
+        'warnProxyOverride': warnProxyOverride,
+        'debugPcap': debugPcap,
+        'debugTlsKeyLog': debugTlsKeyLog,
+        'extraArgs': extraArgs,
+        'setupGuideShown': setupGuideShown,
         'selectedProfileId': selectedProfileId,
       };
 
@@ -269,6 +317,16 @@ class AppSettings {
       silentStart: v('silentStart', false),
       hideDockIcon: v('hideDockIcon', false),
       autoCheckUpdate: v('autoCheckUpdate', true),
+      autoReconnect: v('autoReconnect', false),
+      reconnectDelay: v('reconnectDelay', 5),
+      notifications: v('notifications', true),
+      minimizeToTray: v('minimizeToTray', false),
+      systemProxyBypass: v('systemProxyBypass', ''),
+      warnProxyOverride: v('warnProxyOverride', true),
+      debugPcap: v('debugPcap', false),
+      debugTlsKeyLog: v('debugTlsKeyLog', false),
+      extraArgs: v('extraArgs', ''),
+      setupGuideShown: v('setupGuideShown', false),
       selectedProfileId: j['selectedProfileId'] as String?,
     );
   }

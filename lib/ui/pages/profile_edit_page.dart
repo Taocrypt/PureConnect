@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart';
 
+import '../../core/config_builder.dart' show clientDataFile;
 import '../../l10n/strings.dart';
 import '../../models/profile.dart';
 import '../../state/providers.dart';
@@ -109,6 +110,18 @@ class _ProfileEditPageState extends ConsumerState<ProfileEditPage> {
         ),
       ),
     );
+  }
+
+  /// Deletes the saved aTrust client data (session, device id, cookies).
+  Future<void> _clearLoginCache() async {
+    final ok = await confirm(context,
+        title: context.tr('clear_login_cache'), message: context.tr('clear_login_cache_confirm'), destructive: true);
+    if (!ok || !mounted) return;
+    try {
+      final f = clientDataFile(ref.read(dataDirProvider), p);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+    if (mounted) showToast(context, context.tr('clear_login_cache_done'), level: BannerLevel.success);
   }
 
   Future<void> _trust(bool trust) async {
@@ -276,6 +289,12 @@ class _ProfileEditPageState extends ConsumerState<ProfileEditPage> {
               glyph: AppGlyphs.block,
               title: context.tr('untrust_device'),
               onTap: _busy || !p.saveClientData ? null : () => _trust(false),
+            ),
+            SettingsTile(
+              glyph: AppGlyphs.clearAll,
+              title: context.tr('clear_login_cache'),
+              destructive: true,
+              onTap: _busy ? null : _clearLoginCache,
             ),
           ]),
       ]),

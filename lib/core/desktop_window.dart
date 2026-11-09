@@ -6,8 +6,9 @@ import 'package:flutter/services.dart';
 /// macos/Runner/MainFlutterWindow.swift, linux/runner/my_application.cc).
 ///
 /// Dart → native: setIcon, show, hide, isVisible, setPreventClose, quit;
-/// macOS setDockIconVisible; Windows proxyGet / proxySet / proxyGuard.
+/// macOS setDockIconVisible / launchArgs; Windows proxyGet / proxySet / proxyGuard.
 /// Native → Dart: close (window close button while preventClose is on),
+/// minimized (window minimised),
 /// quitRequested (macOS Cmd+Q / logout), activate (second launch, Dock click).
 class DesktopWindow {
   static const channel = MethodChannel('pureconnect/window');
@@ -28,6 +29,17 @@ class DesktopWindow {
   static Future<bool> isVisible() async => await _call<bool>('isVisible') ?? true;
   static Future<void> setPreventClose(bool v) => _call('setPreventClose', v);
   static Future<void> quit() => _call('quit');
+  /// Command-line arguments of this launch. Windows and Linux hand them to
+  /// main(); macOS' runner does not, so they are asked for over the channel.
+  static List<String> mainArgs = const [];
+  static Future<List<String>> launchArgs() async {
+    if (Platform.isMacOS) {
+      final l = await _call<List<Object?>>('launchArgs');
+      return l?.map((e) => '$e').toList() ?? const [];
+    }
+    return mainArgs;
+  }
+
   static Future<void> setDockIconVisible(bool v) async {
     if (Platform.isMacOS) await _call('setDockIconVisible', v);
   }

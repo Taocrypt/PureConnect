@@ -49,7 +49,75 @@ class SystemProxy {
     return true;
   }
 
-  static Future<void> enable({required String dataDir, required int httpPort, required int socksPort}) async {
+  /// Built-in exclusions plus the user's own ([extra]), without duplicates.
+  static List<String> bypassWith(List<String> extra) => [
+        ...bypass,
+        for (final e in extra)
+          if (!bypass.contains(e)) e,
+      ];
+
+  /// A system proxy that someone else (Clash, another VPN client) has turned
+  /// on, as a short description; null when there is none or it is ours.
+  static Future<String?> foreignProxy(String dataDir) async {
+    if (!supported) return null;
+    // Our own backup exists: the current proxy is ours (reconnect).
+    if (_backupFile(dataDir).existsSync()) return null;
+    try {
+      final snap = await _snapshot();
+      return describeForeign(snap);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Pure part of [foreignProxy], on a [_snapshot] map (tested).
+  static String? describeForeign(Map<String, dynamic> snap) {
+    final w = snap['windows'];
+    if (w is Map) {
+      final pac = (w['autoConfigUrl'] as String? ?? '').trim();
+      if (pac.isNotEmpty) return 'PAC $pac';
+      if (const ['1', 'true'].contains('${w['enable']}') && (w['server'] as String? ?? '').isNotEmpty) return w['server'] as String;
+      return null;
+    }
+    final mac = snap['mac'];
+    if (mac is Map) {
+      for (final v in mac.values) {
+        if (v is! Map) continue;
+        for (final k in const ['web', 'secure', 'socks']) {
+          final x = v[k];
+          if (x is Map && x['enabled'] == true && (x['server'] as String? ?? '').isNotEmpty) {
+            return '${x['server']}:${x['port']}';
+          }
+        }
+      }
+      return null;
+    }
+    final gnome = snap['gnome'];
+    if (gnome is Map) {
+      final mode = (gnome['org.gnome.system.proxy mode'] as String? ?? '').replaceAll("'", '').trim();
+      if (mode == 'manual') {
+        final host = (gnome['org.gnome.system.proxy.http host'] as String? ?? '').replaceAll("'", '').trim();
+        final port = (gnome['org.gnome.system.proxy.http port'] as String? ?? '').trim();
+        return host.isEmpty ? 'manual' : '$host:$port';
+      }
+      if (mode == 'auto') return 'PAC';
+    }
+    final kde = snap['kde'];
+    if (kde is Map && (kde['ProxyType'] ?? '0') != '0' && kde['ProxyType'] != '') return 'KDE';
+    return null;
+  }
+
+  /// Turns the system proxy off right now (tools menu "clear system proxy"):
+  /// restores our backup when there is one, else switches every proxy off.
+  static Future<void> clear(String dataDir) => disable(dataDir);
+
+  static Future<void> enable({
+    required String dataDir,
+    required int httpPort,
+    required int socksPort,
+    List<String> extraBypass = const [],
+  }) async {
+    final bypass = bypassWith(extraBypass);
     final f = _backupFile(dataDir);
     Map<String, dynamic>? snap;
     if (f.existsSync()) {
@@ -97,15 +165,15 @@ class SystemProxy {
         await g(['org.gnome.system.proxy.socks', 'host', '127.0.0.1']);
         await g(['org.gnome.system.proxy.socks', 'port', '$socksPort']);
       }
-      await g(['org.gnome.system.proxy', 'ignore-hosts',
-        "['localhost', '127.0.0.0/8', '::1', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12']"]);
+      final hosts = ['localhost', '127.0.0.0/8', '::1', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', ...extraBypass];
+      await g(['org.gnome.system.proxy', 'ignore-hosts', '[${hosts.map((h) => "'${h.replaceAll("'", '')}'").join(', ')}]']);
       if (_isKde) {
         await _kdeWrite({
           'ProxyType': '1',
           'httpProxy': httpPort > 0 ? 'http://127.0.0.1 $httpPort' : '',
           'httpsProxy': httpPort > 0 ? 'http://127.0.0.1 $httpPort' : '',
           'socksProxy': socksPort > 0 ? 'socks://127.0.0.1 $socksPort' : '',
-          'NoProxyFor': 'localhost,127.0.0.0/8,::1,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12',
+          'NoProxyFor': ['localhost', '127.0.0.0/8', '::1', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', ...extraBypass].join(','),
         });
       }
     }

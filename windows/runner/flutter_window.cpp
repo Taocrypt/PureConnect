@@ -340,6 +340,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     WriteProxy(*proxy_guard_);
     proxy_guard_.reset();
   }
+  if (message == WM_SIZE && wparam == SIZE_MINIMIZED) {
+    // Dart hides the window to the tray when "minimise to tray" is on.
+    Notify("minimized");
+  }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
