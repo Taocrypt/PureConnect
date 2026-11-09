@@ -71,6 +71,11 @@ class _ProfileEditPageState extends ConsumerState<ProfileEditPage> {
       showToast(context, '${context.tr('name')}?', level: BannerLevel.warning);
       return;
     }
+    p.serverAddress = p.serverAddress.trim();
+    if (p.serverAddress.isEmpty) {
+      showToast(context, '${context.tr('server_address')}?', level: BannerLevel.warning);
+      return;
+    }
     if (p.serverPort < 1 || p.serverPort > 65535) {
       showToast(context, '${context.tr('server_port')}: 1-65535', level: BannerLevel.warning);
       return;
@@ -181,19 +186,11 @@ class _ProfileEditPageState extends ConsumerState<ProfileEditPage> {
               onChanged: (v) => setState(() {
                 _collect();
                 p.protocol = v;
-                if (v == VpnProtocol.atrust && (p.serverAddress.isEmpty || p.serverAddress == 'rvpn.zju.edu.cn')) {
-                  p.serverAddress = 'vpn.zju.edu.cn';
-                  _c['server']?.text = p.serverAddress;
-                }
-                if (v == VpnProtocol.easyconnect && (p.serverAddress.isEmpty || p.serverAddress == 'vpn.zju.edu.cn')) {
-                  p.serverAddress = 'rvpn.zju.edu.cn';
-                  _c['server']?.text = p.serverAddress;
-                }
               }),
             ),
           ),
           _field('server', context.tr('server_address'), p.serverAddress,
-              hint: at ? 'vpn.zju.edu.cn' : 'rvpn.zju.edu.cn', type: TextInputType.url),
+              hint: at ? 'vpn.xxx.edu.cn' : 'xvpn.xxx.edu.cn', type: TextInputType.url),
           _field('port', context.tr('server_port'), '${p.serverPort}', type: TextInputType.number),
         ]),
         SettingsGroup(title: context.tr('account'), children: [
