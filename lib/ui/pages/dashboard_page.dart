@@ -18,6 +18,7 @@ import '../kit/app_glyphs.dart';
 import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
 import '../kit/topology.dart';
+import '../tour/guide_tour.dart';
 
 String formatDuration(Duration d) {
   String two(int n) => n.toString().padLeft(2, '0');
@@ -209,7 +210,7 @@ class _StatusCard extends ConsumerWidget {
             ),
             SizedBox(
               width: mobile ? buttonSize : 120,
-              child: Center(child: _StartToggle(size: buttonSize)),
+              child: Center(child: GuideTarget(id: 'connect', child: _StartToggle(size: buttonSize))),
             ),
           ]),
         ),
@@ -277,7 +278,12 @@ class _StartToggleState extends ConsumerState<_StartToggle> with SingleTickerPro
     return Tooltip(
       message: active ? context.tr('disconnect') : context.tr('connect'),
       child: PressRegion(
-        onTap: enabled ? () => toggleConnection(context, ref) : null,
+        onTap: enabled
+            ? () {
+                GuideTour.instance.targetUsed(GuideStep.connect);
+                toggleConnection(context, ref);
+              }
+            : null,
         onHover: (v) => setState(() => _hovered = v),
         child: ElasticPress(
           enabled: enabled,

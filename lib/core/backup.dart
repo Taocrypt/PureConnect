@@ -262,7 +262,7 @@ String _stamp(DateTime t) {
 
 String backupFileName() => 'pureconnect-${_stamp(DateTime.now())}.json';
 
-/// Remote names are <device>-<yyyyMMdd-HHmmss>.json so every device keeps
+/// Remote names are `<device>-<yyyyMMdd-HHmmss>.json` so every device keeps
 /// its own history and retention only prunes its own files.
 String remoteBackupName(String device) => '${sanitizeDevice(device)}-${_stamp(DateTime.now())}.json';
 

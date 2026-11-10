@@ -71,14 +71,14 @@ void main() {
 
   test('encrypted backup round trip', () {
     final bytes = encodeBackup(profiles: [
-      {'id': 'a', 'name': 'A', 'password': 'pw'},
+      {'id': 'a', 'name': 'A', 'password': 'pw-Distinctive-Plaintext-Marker-9271'},
     ], settings: {}, password: 'secret');
     expect(isEncryptedBackup(bytes), isTrue);
-    expect(utf8.decode(bytes).contains('pw'), isFalse);
+    expect(utf8.decode(bytes).contains('Distinctive-Plaintext-Marker'), isFalse);
     expect(() => decodeBackup(bytes), throwsA(predicate((e) => e is BackupException && e.key == 'backup_need_password')));
     expect(() => decodeBackup(bytes, password: 'nope'),
         throwsA(predicate((e) => e is BackupException && e.key == 'backup_wrong_password')));
-    expect(decodeBackup(bytes, password: 'secret').profiles.single['password'], 'pw');
+    expect(decodeBackup(bytes, password: 'secret').profiles.single['password'], 'pw-Distinctive-Plaintext-Marker-9271');
     // legacy plain format still reads
     final legacy = utf8.encode('{"format":"zju-connect-backup","version":1,"profiles":[]}');
     expect(decodeBackup(legacy).profiles, isEmpty);

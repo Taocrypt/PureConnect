@@ -300,11 +300,11 @@ Future<bool> confirm(BuildContext context, {required String title, String? messa
       builder: (ctx) => AlertDialog(
         title: title,
         destructive: destructive,
-        child: message == null ? null : Text(message),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.tr('cancel'))),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.tr('ok'))),
         ],
+        child: message == null ? null : Text(message),
       ),
     ),
   );
@@ -316,8 +316,8 @@ Future<void> notice(BuildContext context, {required String title, String? messag
       child: Builder(
         builder: (ctx) => AlertDialog(
           title: title,
-          child: message == null ? null : Text(message),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('ok')))],
+          child: message == null ? null : Text(message),
         ),
       ),
     );
@@ -338,6 +338,10 @@ Future<String?> editTextDialog(
       builder: (ctx) => AlertDialog(
         title: title,
         hasFields: true,
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: Text(ctx.tr('ok'))),
+        ],
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
           if (message != null) Text(message, style: DashboardText.label(ctx)),
           TextField(
@@ -349,10 +353,6 @@ Future<String?> editTextDialog(
             onSubmitted: (v) => Navigator.pop(ctx, v),
           ),
         ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: Text(ctx.tr('ok'))),
-        ],
       ),
     ),
   );
@@ -368,6 +368,7 @@ Future<T?> pickOne<T>(BuildContext context, {required String title, required Lis
     child: Builder(
       builder: (ctx) => AlertDialog(
         title: title,
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel')))],
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           for (final (v, label) in options)
             PressRegion(
@@ -382,7 +383,6 @@ Future<T?> pickOne<T>(BuildContext context, {required String title, required Lis
               ),
             ),
         ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel')))],
       ),
     ),
   );

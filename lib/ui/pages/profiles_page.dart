@@ -13,12 +13,22 @@ import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
 import '../home_shell.dart' show switchProfile;
 import 'profile_edit_page.dart';
-import 'setup_guide_page.dart';
+import '../tour/guide_tour.dart';
 
 class ProfilesPage extends ConsumerWidget {
   const ProfilesPage({super.key});
 
+  /// Opens a blank profile in the editor with the setup tour's targets on.
+  static Future<void> _openGuided(BuildContext context) =>
+      pushPage(context, (_) => ProfileEditPage(profile: Profile(name: '', disableZjuConfig: true), isNew: true, guided: true));
+
   Future<void> _add(BuildContext context) async {
+    final tour = GuideTour.instance;
+    if (tour.step == GuideStep.add) {
+      tour.advance(from: GuideStep.add);
+      await _openGuided(context);
+      return;
+    }
     final kind = await pickOne<String>(
       context,
       title: context.tr('add_profile'),
@@ -31,7 +41,8 @@ class ProfilesPage extends ConsumerWidget {
     );
     if (kind == null || !context.mounted) return;
     if (kind == 'guide') {
-      await pushPage(context, (_) => const SetupGuidePage());
+      GuideTour.instance.start(inEditor: true);
+      await _openGuided(context);
       return;
     }
     Profile p;
@@ -60,6 +71,10 @@ class ProfilesPage extends ConsumerWidget {
       child: StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           title: ctx.tr('share_warn_title'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.tr('cancel'))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.tr('share_profile_go'))),
+          ],
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(ctx.tr('share_warn_body')),
             const SizedBox(height: 4),
@@ -77,10 +92,6 @@ class ProfilesPage extends ConsumerWidget {
               ),
             ),
           ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.tr('cancel'))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.tr('share_profile_go'))),
-          ],
         ),
       ),
     );
@@ -128,10 +139,17 @@ class ProfilesPage extends ConsumerWidget {
     final active = ref.watch(coreProvider.select((s) => s.isActive));
     final colorScheme = context.colorScheme;
     final colors = DashboardColors.of(context);
+    // Tour "Next" on the add step does what tapping the add button does.
+    GuideTour.instance.bind(GuideStep.add, () => _add(context));
 
     return AppPage(
       title: context.tr('profiles'),
-      actions: [HeaderAction(glyph: AppGlyphs.add, tooltip: context.tr('add_profile'), onPressed: () => _add(context))],
+      actions: [
+        GuideTarget(
+          id: 'add',
+          child: HeaderAction(glyph: AppGlyphs.add, tooltip: context.tr('add_profile'), onPressed: () => _add(context)),
+        ),
+      ],
       body: profiles.isEmpty
           ? EmptyHint(glyph: AppGlyphs.profiles, text: context.tr('empty'))
           : PageList(children: [

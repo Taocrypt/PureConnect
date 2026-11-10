@@ -6,7 +6,7 @@ import 'package:zju_connect/l10n/strings.dart';
 import 'package:zju_connect/models/profile.dart';
 import 'package:zju_connect/models/settings.dart';
 import 'package:zju_connect/state/providers.dart';
-import 'package:zju_connect/ui/pages/setup_guide_page.dart';
+import 'package:zju_connect/ui/tour/guide_tour.dart';
 import 'package:zju_connect/ui/widgets/connect_prompts.dart';
 
 void main() {

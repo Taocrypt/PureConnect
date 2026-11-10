@@ -55,6 +55,7 @@ class _CodeDialogState extends State<_CodeDialog> {
     return AlertDialog(
       title: title,
       hasFields: true,
+      actions: _actions(context, submit),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
         if (widget.c.message.isNotEmpty) Text(widget.c.message, style: DashboardText.label(context)),
         TextField(controller: _ctl, autofocus: true, keyboardType: TextInputType.number, onSubmitted: (_) => submit()),
@@ -64,7 +65,6 @@ class _CodeDialogState extends State<_CodeDialog> {
             DashboardSwitch(value: _skip, onChanged: (v) => setState(() => _skip = v)),
           ]),
       ]),
-      actions: _actions(context, submit),
     );
   }
 }
@@ -85,6 +85,7 @@ class _TextCaptchaDialogState extends State<_TextCaptchaDialog> {
     return AlertDialog(
       title: context.tr('challenge_captcha'),
       hasFields: true,
+      actions: _actions(context, submit),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
         if (widget.c.imagePath.isNotEmpty)
           ClipRRect(
@@ -93,7 +94,6 @@ class _TextCaptchaDialogState extends State<_TextCaptchaDialog> {
           ),
         TextField(controller: _ctl, autofocus: true, onSubmitted: (_) => submit()),
       ]),
-      actions: _actions(context, submit),
     );
   }
 }
@@ -131,6 +131,12 @@ class _ClickCaptchaDialogState extends State<_ClickCaptchaDialog> {
     return AlertDialog(
       title: context.tr('challenge_click'),
       hasFields: true,
+      actions: _actions(
+        context,
+        _points.isEmpty || img == null
+            ? null
+            : () => Navigator.pop(context, ChallengeAnswer(points: List.of(_points), width: img.width, height: img.height)),
+      ),
       child: img == null
           ? const SizedBox(height: 120, child: Center(child: ActivityIndicator()))
           : Column(mainAxisSize: MainAxisSize.min, spacing: 8, children: [
@@ -179,12 +185,6 @@ class _ClickCaptchaDialogState extends State<_ClickCaptchaDialog> {
                 ),
               ]),
             ]),
-      actions: _actions(
-        context,
-        _points.isEmpty || img == null
-            ? null
-            : () => Navigator.pop(context, ChallengeAnswer(points: List.of(_points), width: img.width, height: img.height)),
-      ),
     );
   }
 }
@@ -205,6 +205,7 @@ class _ExternalLoginDialogState extends State<_ExternalLoginDialog> {
     return AlertDialog(
       title: '${context.tr('challenge_external')} · ${widget.c.codeKind.toUpperCase()}',
       hasFields: true,
+      actions: _actions(context, submit),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
         Text(context.tr('challenge_external_hint'), style: DashboardText.label(context)),
         if (widget.c.loginUrl.isNotEmpty)
@@ -219,7 +220,6 @@ class _ExternalLoginDialogState extends State<_ExternalLoginDialog> {
           onSubmitted: (_) => submit(),
         ),
       ]),
-      actions: _actions(context, submit),
     );
   }
 }

@@ -23,9 +23,9 @@ import 'pages/logs_page.dart';
 import 'pages/profiles_page.dart';
 import 'pages/resources_page.dart';
 import 'pages/settings_page.dart';
-import 'pages/setup_guide_page.dart';
 import 'widgets/challenge_dialogs.dart';
 import 'widgets/connect_prompts.dart';
+import 'tour/guide_tour.dart';
 
 enum AppTab { dashboard, profiles, resources, logs, tools }
 
@@ -58,6 +58,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   void initState() {
     super.initState();
+    GuideTour.instance.showTab = (tab) {
+      if (!mounted) return;
+      ref.read(currentTabProvider.notifier).go(switch (tab) {
+        GuideTab.profiles => AppTab.profiles,
+        GuideTab.dashboard => AppTab.dashboard,
+      });
+    };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _surfaceCrashLog();
       if (!mounted) return;
@@ -79,8 +86,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (!mounted) return;
     if (ref.read(profilesProvider).isEmpty && !settings.setupGuideShown && !args.contains('--hidden')) {
       ref.read(settingsProvider.notifier).update((s) => s.setupGuideShown = true);
-      await pushPage(context, (_) => const SetupGuidePage());
-      if (!mounted) return;
+      GuideTour.instance.start();
     }
     final connect = settings.autoConnect || args.contains('--connect');
     if (connect && ref.read(profilesProvider).isNotEmpty && !ref.read(coreProvider).isActive) {

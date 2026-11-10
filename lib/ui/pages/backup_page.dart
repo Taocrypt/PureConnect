@@ -340,15 +340,6 @@ class _DavFormState extends State<_DavForm> {
     return AlertDialog(
       title: 'WebDAV',
       hasFields: true,
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
-        TextField(
-          controller: _uri,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(hintText: 'https://dav.jianguoyun.com/dav/'),
-        ),
-        TextField(controller: _user, decoration: InputDecoration(hintText: context.tr('username'))),
-        TextField(controller: _pass, obscureText: true, decoration: InputDecoration(hintText: context.tr('password'))),
-      ]),
       actions: [
         if (widget.initial != null)
           TextButton(
@@ -373,6 +364,15 @@ class _DavFormState extends State<_DavForm> {
           child: Text(context.tr('ok')),
         ),
       ],
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
+        TextField(
+          controller: _uri,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(hintText: 'https://dav.jianguoyun.com/dav/'),
+        ),
+        TextField(controller: _user, decoration: InputDecoration(hintText: context.tr('username'))),
+        TextField(controller: _pass, obscureText: true, decoration: InputDecoration(hintText: context.tr('password'))),
+      ]),
     );
   }
 }

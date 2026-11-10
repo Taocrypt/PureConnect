@@ -24,6 +24,7 @@ import '../widgets/update_dialog.dart';
 import '../kit/app_glyphs.dart';
 import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
+import '../tour/guide_tour.dart';
 import 'backup_page.dart';
 import 'list_editors.dart';
 import 'logs_page.dart';
@@ -653,6 +654,16 @@ class _AboutState extends ConsumerState<_About> {
         subtitle: context.tr('auto_check_update_desc'),
         value: s.autoCheckUpdate,
         onChanged: (v) => n.update((x) => x.autoCheckUpdate = v),
+      ),
+      SettingsTile(
+        glyph: AppGlyphs.sparkle,
+        title: context.tr('tour_replay'),
+        chevron: true,
+        onTap: () {
+          // The tour starts on the profiles tab of the home shell.
+          Navigator.of(context).popUntil((r) => r.isFirst);
+          GuideTour.instance.start();
+        },
       ),
       SettingsTile(
         glyph: AppGlyphs.code,

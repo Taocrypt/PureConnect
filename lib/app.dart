@@ -10,6 +10,7 @@ import 'l10n/ui_localizations.dart';
 import 'models/settings.dart' as m;
 import 'state/providers.dart';
 import 'ui/home_shell.dart';
+import 'ui/tour/guide_tour.dart';
 import 'ui/kit/dashboard_kit.dart';
 
 /// FlClash's default primary (iOS blue) and colour style.
@@ -71,7 +72,16 @@ class ZjuConnectApp extends ConsumerWidget {
             statusBarBrightness: dark ? Brightness.dark : Brightness.light,
             systemNavigationBarIconBrightness: dark ? Brightness.light : Brightness.dark,
           ),
-          child: ViewScope(size: size, isMobile: size.width < mobileBreakpoint, child: child!),
+          child: ViewScope(
+            size: size,
+            isMobile: size.width < mobileBreakpoint,
+            // The setup tour sits above the navigator so it follows across
+            // pages; its own overlay hosts the bubble's buttons.
+            child: Stack(fit: StackFit.expand, children: [
+              child!,
+              Positioned.fill(child: Overlay.wrap(child: const GuideTourLayer())),
+            ]),
+          ),
         );
       },
       home: const HomeShell(),

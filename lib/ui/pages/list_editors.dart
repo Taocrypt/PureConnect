@@ -64,6 +64,10 @@ Future<List<String>?> _fieldsDialog(
       builder: (ctx, set) => AlertDialog(
         title: title,
         hasFields: true,
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, [for (final c in ctls) c.text.trim()]), child: Text(ctx.tr('save'))),
+        ],
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
           if (header != null) header(set),
           for (final (i, f) in fields.indexed) ...[
@@ -71,10 +75,6 @@ Future<List<String>?> _fieldsDialog(
             TextField(controller: ctls[i], autocorrect: false, decoration: InputDecoration(hintText: f.$2)),
           ],
         ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.tr('cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, [for (final c in ctls) c.text.trim()]), child: Text(ctx.tr('save'))),
-        ],
       ),
     ),
   );

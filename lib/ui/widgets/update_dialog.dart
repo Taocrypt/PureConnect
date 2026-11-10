@@ -182,6 +182,16 @@ class _UpdateDialogState extends State<UpdateDialog> {
     }
     return AlertDialog(
       title: context.tr('update_available', {'v': r.tag}),
+      actions: [
+        TextButton(
+          onPressed: () {
+            _cancel?.complete();
+            Navigator.of(context).pop();
+          },
+          child: Text(context.tr('update_later')),
+        ),
+        TextButton(onPressed: onPrimary, child: Text(primary)),
+      ],
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
         Text(context.tr('update_versions', {'cur': widget.current, 'new': r.version}), style: label),
         ConstrainedBox(
@@ -204,16 +214,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
         ],
         if (_error != null) Text(_error!, style: label.copyWith(color: context.colorScheme.error)),
       ]),
-      actions: [
-        TextButton(
-          onPressed: () {
-            _cancel?.complete();
-            Navigator.of(context).pop();
-          },
-          child: Text(context.tr('update_later')),
-        ),
-        TextButton(onPressed: onPrimary, child: Text(primary)),
-      ],
     );
   }
 }
