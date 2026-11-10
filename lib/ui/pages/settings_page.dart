@@ -29,6 +29,7 @@ import 'backup_page.dart';
 import 'list_editors.dart';
 import 'logs_page.dart';
 import 'theme_page.dart';
+import 'update_mirrors_page.dart';
 
 /// "Tools" in FlClash's navigation, in sections: 连接 (proxy, DNS, advanced),
 /// 规则与转发 (domain / DNS / port lists), 应用 (theme, language, start-up,
@@ -654,6 +655,15 @@ class _AboutState extends ConsumerState<_About> {
         subtitle: context.tr('auto_check_update_desc'),
         value: s.autoCheckUpdate,
         onChanged: (v) => n.update((x) => x.autoCheckUpdate = v),
+      ),
+      SettingsTile(
+        glyph: AppGlyphs.cloudDownload,
+        title: context.tr('update_mirrors'),
+        subtitle: s.updateMirrors.isNotEmpty
+            ? context.tr('update_mirrors_desc_custom', {'n': '${s.updateMirrors.length}'})
+            : context.tr(MirrorMode.parse(s.updateMirrorMode) == MirrorMode.direct ? 'update_mirrors_desc_direct' : 'update_mirrors_desc_auto'),
+        chevron: true,
+        onTap: () => pushPage(context, (_) => AppPage(canPop: true, title: context.tr('update_mirrors'), body: const UpdateMirrorsPage())),
       ),
       SettingsTile(
         glyph: AppGlyphs.sparkle,

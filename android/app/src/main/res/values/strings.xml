@@ -5,4 +5,5 @@
     <string name="notify_stop">Disconnect</string>
     <string name="notify_total">total ↑%1$s ↓%2$s</string>
     <string name="notify_alerts">Alerts</string>
+    <string name="notify_updates">Updates</string>
 </resources>

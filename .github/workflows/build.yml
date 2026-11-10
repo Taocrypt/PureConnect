@@ -274,7 +274,39 @@ jobs:
               git log --pretty='- %s' "$TAG" >> notes.md
             fi
           fi
+          # Forced update: a "最低支持版本: x.y.z" (or "min-version: x.y.z")
+          # line in the section. It is moved out of the visible notes into an
+          # HTML comment (read by older clients from the API) and update.json.
+          export LC_ALL=C.UTF-8
+          MIN=$(grep -oP '^\s*(<!--\s*)?([-*]\s*)?(最低支持版本|min-version|min_supported_version)\s*[:：]\s*[vV]?\K[0-9][0-9A-Za-z.-]*' notes.md | head -n1 || true)
+          grep -vP '^\s*(<!--\s*)?([-*]\s*)?(最低支持版本|min-version|min_supported_version)\s*[:：]' notes.md > notes.tmp || true
+          mv notes.tmp notes.md
+          if [ -n "$MIN" ]; then printf '\n<!-- min-version: %s -->\n' "$MIN" >> notes.md; fi
+          echo "min supported version: ${MIN:-none}"
           cat notes.md
+          # update.json: release info the app can fetch through GitHub
+          # mirrors when api.github.com is blocked.
+          MIN="$MIN" TAG="$TAG" VER="$VER" REPO="$GITHUB_REPOSITORY" python3 - <<'PY'
+          import json, os, datetime
+          tag, ver, repo = os.environ["TAG"], os.environ["VER"], os.environ["REPO"]
+          notes = open("notes.md", encoding="utf-8").read()
+          assets = []
+          for n in sorted(os.listdir("artifacts")):
+              p = os.path.join("artifacts", n)
+              if os.path.isfile(p) and n != "update.json":
+                  assets.append({"name": n, "size": os.path.getsize(p),
+                                 "url": f"https://github.com/{repo}/releases/download/{tag}/{n}"})
+          data = {
+              "version": ver,
+              "tag": tag,
+              "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "notes": notes,
+              "min_supported_version": os.environ.get("MIN") or None,
+              "assets": assets,
+          }
+          json.dump(data, open("artifacts/update.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          PY
+          cat artifacts/update.json
       - name: Publish
         shell: bash
         env:

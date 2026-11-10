@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
+        handleInstallIntent(intent)
     }
 
 
@@ -136,6 +137,21 @@ class MainActivity : FlutterActivity() {
                 }.isSuccess)
                 "supportedAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
                 "installApk" -> result.success(installApk(call.argument<String>("path") ?: ""))
+                "updateProgress" -> result.success(runCatching {
+                    updateNotification(call.argument<String>("title") ?: "", call.argument<String>("text") ?: "",
+                        call.argument<Int>("percent") ?: -1, ongoing = true, apk = null)
+                }.isSuccess)
+                "updateDone" -> result.success(runCatching {
+                    updateNotification(call.argument<String>("title") ?: "", call.argument<String>("text") ?: "",
+                        null, ongoing = false, apk = call.argument<String>("path"))
+                }.isSuccess)
+                "updateFailed" -> result.success(runCatching {
+                    updateNotification(call.argument<String>("title") ?: "", call.argument<String>("text") ?: "",
+                        null, ongoing = false, apk = null)
+                }.isSuccess)
+                "updateClear" -> result.success(runCatching {
+                    getSystemService(android.app.NotificationManager::class.java).cancel(UPDATE_ID)
+                }.isSuccess)
                 "launcherIcon" -> result.success(currentLauncherIcon())
                 "setLauncherIcon" -> result.success(runCatching {
                     setLauncherIcon(call.arguments as String)
@@ -239,6 +255,45 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** Update download on its own low-importance channel: ongoing with a
+     *  progress bar while downloading ([percent] -1 = indeterminate, null =
+     *  none); when [apk] is set, tapping it opens the installer. */
+    private fun updateNotification(title: String, text: String, percent: Int?, ongoing: Boolean, apk: String?) {
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(UPDATE_CHANNEL) == null) {
+            nm.createNotificationChannel(android.app.NotificationChannel(
+                UPDATE_CHANNEL, getString(R.string.notify_updates), android.app.NotificationManager.IMPORTANCE_LOW))
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val tap = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (apk != null) tap.putExtra(EXTRA_INSTALL_APK, apk)
+        val open = android.app.PendingIntent.getActivity(this, 3, tap,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        val b = androidx.core.app.NotificationCompat.Builder(this, UPDATE_CHANNEL)
+            .setSmallIcon(if (ongoing) android.R.drawable.stat_sys_download else R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOnlyAlertOnce(true)
+            .setOngoing(ongoing)
+            .setAutoCancel(!ongoing)
+            .setContentIntent(open)
+        if (percent != null) b.setProgress(100, percent.coerceIn(0, 100), percent < 0)
+        nm.notify(UPDATE_ID, b.build())
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleInstallIntent(intent)
+    }
+
+    /** "Download complete, tap to install" notification. */
+    private fun handleInstallIntent(intent: Intent?) {
+        val apk = intent?.getStringExtra(EXTRA_INSTALL_APK) ?: return
+        intent.removeExtra(EXTRA_INSTALL_APK)
+        if (java.io.File(apk).exists()) runCatching { installApk(apk) }
+    }
+
     /** One-off alert (unexpected disconnect, reconnecting) on its own channel. */
     private fun showAlert(title: String, body: String) {
         val nm = getSystemService(android.app.NotificationManager::class.java)
@@ -291,6 +346,9 @@ class MainActivity : FlutterActivity() {
         const val REQ_NOTIFY = 0x4e54
         const val ALERT_CHANNEL = "alerts"
         const val ALERT_ID = 0x414c
+        const val UPDATE_CHANNEL = "updates"
+        const val UPDATE_ID = 0x5550
+        const val EXTRA_INSTALL_APK = "pc_install_apk"
     }
 
     private val launcherIcons = listOf("a1", "a2", "b1", "b2")

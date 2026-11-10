@@ -29,7 +29,7 @@
 | 额外内核参数（zju-connect 命令行格式）、PCAP / TLS 密钥导出与调试文件 | 工具 → 连接 → 高级 |
 | 最小化到托盘、系统代理排除、覆盖提示、清除系统代理、`--connect` 启动参数 | 工具 → 桌面 |
 | 日志导出、aTrust 清除登录缓存、恢复默认设置 | 日志 / 配置 → 编辑 / 备份与恢复 |
-| 检查更新（GitHub Release；Android 按架构下载 APK 并安装，桌面下载安装包），启动时每天最多自动检查一次 | 工具 → 关于 |
+| 检查更新（GitHub Release；Android 按架构下载 APK 并安装，桌面下载安装包），启动时自动检查；直连 GitHub 不通时自动测速选用镜像，可自定义镜像或始终直连 | 工具 → 关于 |
 
 ## 架构
 
@@ -79,10 +79,13 @@ flutter build macos --release    # macOS（内核放在 .app/Contents/Resources/
 * 版本号以 `pubspec.yaml` 的 `version` 为准；发布时以 tag 为准（`v1.2.3` → `1.2.3`），
   CI 用 `--build-name` 写入应用，构建号由版本推出（`1.2.3` → `10203`），保证 Android 每次升级 versionCode 递增。
 * 更新内容写在 `CHANGELOG.md` 的 `## [x.y.z] - 日期` 小节。
+* 强制更新：在该小节中单独写一行 `最低支持版本: x.y.z`（或 `min-version: x.y.z`）。CI 会把它从可见说明中移除，
+  改为 `<!-- min-version: x.y.z -->` 注释并写入 `update.json` 的 `min_supported_version`；低于该版本的应用
+  每次启动都会检查，并弹出无法关闭的更新对话框直到更新。
 * CI（`.github/workflows/build.yml`）：推送到 `main` 时构建全部平台并上传 artifacts；推送 `v*` tag 时额外创建
   GitHub Release（说明取自 CHANGELOG 对应小节，没有则用上一个 tag 以来的提交），附带：
   Android arm64-v8a / armeabi-v7a / x86_64 / universal APK、Windows zip + 安装程序、macOS universal dmg、
-  Linux tar.gz + deb。各平台内核均由 CI 现场编译（Android 的 armeabi-v7a / x86_64 使用 NDK）。
+  Linux tar.gz + deb，以及供应用经镜像检查更新的 `update.json`。各平台内核均由 CI 现场编译（Android 的 armeabi-v7a / x86_64 使用 NDK）。
 * Android 签名使用仓库 secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。
 * Linux 本地构建需要 `libgtk-3-dev libx11-dev libayatana-appindicator3-dev`。
 

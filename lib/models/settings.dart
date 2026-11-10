@@ -95,6 +95,8 @@ class AppSettings {
     this.silentStart = false,
     this.hideDockIcon = false,
     this.autoCheckUpdate = true,
+    this.updateMirrorMode = 'auto',
+    List<String>? updateMirrors,
     this.autoReconnect = false,
     this.reconnectDelay = 5,
     this.notifications = true,
@@ -111,7 +113,8 @@ class AppSettings {
         customDns = customDns ?? [],
         customProxyDomains = customProxyDomains ?? [],
         bypassApps = bypassApps ?? List.of(defaultBypassApps),
-        favoriteResources = favoriteResources ?? [];
+        favoriteResources = favoriteResources ?? [],
+        updateMirrors = updateMirrors ?? [];
 
   /// Android: VPN (like the old app). Desktop: system proxy, like FlClash —
   /// TUN needs administrator rights.
@@ -174,6 +177,11 @@ class AppSettings {
   bool hideDockIcon;
   /// Check GitHub Releases for a new version on launch (at most once a day).
   bool autoCheckUpdate;
+  /// Update downloads: 'auto' (direct when reachable, else built-in mirrors)
+  /// or 'direct' (never built-in mirrors).
+  String updateMirrorMode;
+  /// User's own GitHub mirror prefixes, tried first in this order.
+  List<String> updateMirrors;
   /// Reconnect by itself after the tunnel drops (network / session errors,
   /// never wrong credentials), after [reconnectDelay] seconds.
   bool autoReconnect;
@@ -250,6 +258,8 @@ class AppSettings {
         'silentStart': silentStart,
         'hideDockIcon': hideDockIcon,
         'autoCheckUpdate': autoCheckUpdate,
+        'updateMirrorMode': updateMirrorMode,
+        'updateMirrors': updateMirrors,
         'autoReconnect': autoReconnect,
         'reconnectDelay': reconnectDelay,
         'notifications': notifications,
@@ -317,6 +327,8 @@ class AppSettings {
       silentStart: v('silentStart', false),
       hideDockIcon: v('hideDockIcon', false),
       autoCheckUpdate: v('autoCheckUpdate', true),
+      updateMirrorMode: v('updateMirrorMode', 'auto'),
+      updateMirrors: (j['updateMirrors'] as List?)?.map((e) => e.toString()).toList(),
       autoReconnect: v('autoReconnect', false),
       reconnectDelay: v('reconnectDelay', 5),
       notifications: v('notifications', true),

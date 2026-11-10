@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:prism_ui/prism_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/update_task.dart';
 import '../../core/updater.dart';
 import '../../l10n/strings.dart';
 import '../../state/providers.dart';
@@ -13,76 +16,156 @@ import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
 
 const _lastCheckKey = 'update.lastCheck';
+const _lastLatestKey = 'update.lastLatest';
+const _forceMinKey = 'update.forceMin';
 bool _checking = false;
 
-/// Checks GitHub Releases for a newer version.
+/// Whether the launch-time check should run. A known forced update checks
+/// every launch; a newer version found earlier is shown again every launch
+/// until installed; otherwise once a day after the last *successful* check.
+/// With automatic checks off it still looks once a day, but only to catch
+/// forced updates.
+bool shouldAutoCheck({
+  required bool autoEnabled,
+  required String current,
+  required DateTime now,
+  int? lastOkMs,
+  String? lastLatest,
+  String? forceMin,
+}) {
+  if (isForcedUpdate(current, forceMin)) return true;
+  final dayElapsed = lastOkMs == null || now.millisecondsSinceEpoch - lastOkMs >= const Duration(days: 1).inMilliseconds;
+  if (!autoEnabled) return dayElapsed;
+  final pending = lastLatest != null && lastLatest.isNotEmpty && compareVersions(lastLatest, current) > 0;
+  return dayElapsed || pending;
+}
+
+UpdateNetConfig updateNetConfig(WidgetRef ref) {
+  final s = ref.read(settingsProvider);
+  final lang = s.locale.isNotEmpty ? s.locale : PlatformDispatcher.instance.locale.languageCode;
+  return UpdateNetConfig(
+    mode: MirrorMode.parse(s.updateMirrorMode),
+    userMirrors: List.of(s.updateMirrors),
+    prefs: ref.read(prefsProvider),
+    strings: S(lang == 'zh' ? 'zh' : 'en'),
+    notify: s.notifications,
+  );
+}
+
+/// Checks for a newer version (API, else update.json through mirrors).
 ///
 /// [manual]: from the "Check for updates" button: says when it is already
 /// up to date or the check failed. Otherwise (launch) it stays silent unless
-/// there is an update, and runs at most once a day.
+/// there is an update; see [shouldAutoCheck] for when it runs.
 Future<void> checkForUpdate(BuildContext context, WidgetRef ref, {bool manual = false}) async {
   if (_checking) return;
-  final prefs = ref.read(prefsProvider);
-  if (!manual) {
-    if (!ref.read(settingsProvider).autoCheckUpdate) return;
-    final last = prefs.getInt(_lastCheckKey) ?? 0;
-    if (DateTime.now().millisecondsSinceEpoch - last < const Duration(days: 1).inMilliseconds) return;
+  final SharedPreferences prefs = ref.read(prefsProvider);
+  final settings = ref.read(settingsProvider);
+  final current = await currentAppVersion();
+  if (!manual &&
+      !shouldAutoCheck(
+        autoEnabled: settings.autoCheckUpdate,
+        current: current,
+        now: DateTime.now(),
+        lastOkMs: prefs.getInt(_lastCheckKey),
+        lastLatest: prefs.getString(_lastLatestKey),
+        forceMin: prefs.getString(_forceMinKey),
+      )) {
+    return;
   }
+  if (!context.mounted) return;
   _checking = true;
   try {
     if (manual) showToast(context, context.tr('update_checking'));
-    final current = await currentAppVersion();
-    final ReleaseInfo latest;
+    final cfg = updateNetConfig(ref);
+    final forcedKnown = isForcedUpdate(current, prefs.getString(_forceMinKey));
+    Future<ReleaseInfo> fetch(bool builtIn) => fetchRelease(
+          mode: cfg.mode,
+          userMirrors: cfg.userMirrors,
+          candidates: () => loadMirrorCandidates(prefs),
+          allowBuiltIn: builtIn,
+        );
+    ReleaseInfo latest;
     try {
-      latest = await fetchLatestRelease();
+      try {
+        latest = await fetch(!manual && forcedKnown);
+      } on UpdateException catch (e) {
+        if (e.code != 'update_user_mirrors_failed' || !manual || !context.mounted) rethrow;
+        final ok = await confirmBuiltInMirrors(context);
+        if (!ok) return;
+        latest = await fetch(true);
+      }
     } on UpdateException catch (e) {
       if (manual && context.mounted) {
-        showToast(context, e.code == 'update_no_release' ? context.tr('update_latest', {'v': current}) : _errorText(context, e),
+        showToast(context, e.code == 'update_no_release' ? context.tr('update_latest', {'v': current}) : updateErrorText(context, e),
             level: e.code == 'update_no_release' ? BannerLevel.info : BannerLevel.error);
       }
       return;
     }
+    // Only a successful check counts toward "once a day".
     await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
+    await prefs.setString(_lastLatestKey, latest.version);
+    await prefs.setString(_forceMinKey, latest.minSupportedVersion ?? '');
     if (!context.mounted) return;
     if (compareVersions(latest.version, current) <= 0) {
       if (manual) showToast(context, context.tr('update_latest', {'v': current}));
       return;
     }
+    final forced = latest.forces(current);
+    if (!manual && !settings.autoCheckUpdate && !forced) return;
     await showFloatingDialog<void>(
       context: context,
       dismissible: false,
-      child: UpdateDialog(current: current, release: latest),
+      child: UpdateDialog(current: current, release: latest, forced: forced),
     );
   } finally {
     _checking = false;
   }
 }
 
-String _errorText(BuildContext context, UpdateException e) {
+/// "Your mirrors failed — use the built-in ones?"
+Future<bool> confirmBuiltInMirrors(BuildContext context) async {
+  final r = await showFloatingDialog<bool>(
+    context: context,
+    child: Builder(
+      builder: (ctx) => AlertDialog(
+        title: ctx.tr('update_user_mirrors_failed'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.tr('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.tr('update_use_builtin'))),
+        ],
+        child: Text(ctx.tr('update_user_mirrors_failed_desc')),
+      ),
+    ),
+  );
+  return r == true;
+}
+
+String updateErrorText(BuildContext context, UpdateException e) {
   final base = context.tr(e.code);
   return e.detail == null || e.code == 'update_rate_limited' ? base : '$base（${e.detail}）';
 }
 
-/// "New version" dialog: release notes, then download (with progress) and
-/// hand the file to the system installer.
-class UpdateDialog extends StatefulWidget {
-  const UpdateDialog({super.key, required this.current, required this.release});
+/// "New version" dialog: release notes, then download (progress, source,
+/// speed) and hand the file to the system installer. The download itself
+/// lives in [UpdateDownloader], so closing the dialog keeps it going.
+/// [forced]: this version is no longer supported — the dialog cannot be
+/// closed until the update is installed.
+class UpdateDialog extends ConsumerStatefulWidget {
+  const UpdateDialog({super.key, required this.current, required this.release, this.forced = false});
 
   final String current;
   final ReleaseInfo release;
+  final bool forced;
 
   @override
-  State<UpdateDialog> createState() => _UpdateDialogState();
+  ConsumerState<UpdateDialog> createState() => _UpdateDialogState();
 }
 
-class _UpdateDialogState extends State<UpdateDialog> {
+class _UpdateDialogState extends ConsumerState<UpdateDialog> {
   ReleaseAsset? _asset;
   bool _resolved = false;
-  Completer<void>? _cancel;
-  double? _progress;
-  String? _progressText;
-  String? _error;
-  File? _file;
+  UpdateDownloader? _task;
 
   @override
   void initState() {
@@ -90,130 +173,161 @@ class _UpdateDialogState extends State<UpdateDialog> {
     _resolve();
   }
 
+  @override
+  void dispose() {
+    _task?.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _resolve() async {
     final abis = Platform.isAndroid ? await androidAbis() : const <String>[];
     if (!mounted) return;
+    final asset = pickAsset(widget.release, abis: abis);
     setState(() {
-      _asset = pickAsset(widget.release, abis: abis);
+      _asset = asset;
       _resolved = true;
-    });
-  }
-
-  bool get _downloading => _cancel != null;
-
-  static String _mb(int b) => (b / 1048576).toStringAsFixed(1);
-
-  Future<void> _download() async {
-    final asset = _asset;
-    if (asset == null) return;
-    final cancel = Completer<void>();
-    setState(() {
-      _cancel = cancel;
-      _error = null;
-      _progress = null;
-      _progressText = null;
-    });
-    try {
-      final f = await downloadAsset(asset, cancel: cancel, onProgress: (got, total) {
-        if (!mounted) return;
-        setState(() {
-          _progress = total > 0 ? got / total : null;
-          _progressText = total > 0 ? '${_mb(got)} / ${_mb(total)} MB' : '${_mb(got)} MB';
-        });
-      });
-      if (!mounted) return;
-      setState(() {
-        _file = f;
-        _cancel = null;
-      });
-      await _open();
-    } on UpdateException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _cancel = null;
-        _progress = null;
-        _progressText = null;
-        if (e.code != 'update_cancelled') _error = _errorText(context, e);
-      });
-    }
-  }
-
-  Future<void> _open() async {
-    final f = _file;
-    if (f == null) return;
-    try {
-      final r = await openDownloaded(f);
-      if (!mounted) return;
-      if (r == 'need_permission') {
-        setState(() => _error = context.tr('update_need_install_permission'));
-      } else if (r == 'revealed') {
-        showToast(context, context.tr('update_saved', {'path': f.path}));
-        Navigator.of(context).pop();
-      } else if (!Platform.isAndroid) {
-        Navigator.of(context).pop();
+      if (asset != null) {
+        // Tests the download routes right away (direct, else mirrors).
+        _task = UpdateDownloader.forRelease(widget.release, asset, updateNetConfig(ref))..addListener(_changed);
       }
-    } catch (e) {
-      if (mounted) setState(() => _error = context.tr('update_open_failed', {'path': f.path}));
-    }
+    });
+  }
+
+  void _close() => Navigator.of(context).pop();
+
+  Future<void> _pickSource() async {
+    final t = _task;
+    if (t == null || t.downloading) return;
+    final pick = await pickOne<DownloadSource?>(
+      context,
+      title: context.tr('update_source'),
+      current: null,
+      options: [
+        (null, context.tr('update_source_auto')),
+        for (final s in t.choices) (s, t.sourceLabel(s) + (s.kind == SourceKind.user ? ' · ${context.tr('update_source_mine')}' : '')),
+      ],
+    );
+    if (!mounted) return;
+    if (pick != null) t.start(preferred: pick);
   }
 
   @override
   Widget build(BuildContext context) {
     final r = widget.release;
+    final t = _task;
     final notes = r.notes.trim().isEmpty ? context.tr('update_no_notes') : _plainNotes(r.notes);
     final label = DashboardText.label(context);
-    final String primary;
-    final VoidCallback? onPrimary;
-    if (_downloading) {
-      primary = context.tr('cancel_download');
-      onPrimary = () => _cancel?.complete();
-    } else if (_file != null) {
-      primary = context.tr(Platform.isAndroid ? 'update_install' : 'update_open');
-      onPrimary = _open;
-    } else if (_resolved && _asset == null) {
-      primary = context.tr('update_open_page');
-      onPrimary = () {
+    final forced = widget.forced;
+    final mode = MirrorMode.parse(ref.read(settingsProvider).updateMirrorMode);
+
+    final actions = <Widget>[];
+    void action(String text, VoidCallback? onPressed) => actions.add(TextButton(onPressed: onPressed, child: Text(text)));
+    final phase = t?.phase;
+    if (_resolved && _asset == null) {
+      if (!forced) action(context.tr('update_later'), _close);
+      action(context.tr('update_open_page'), () {
         launchUrl(Uri.parse(r.pageUrl), mode: LaunchMode.externalApplication);
-        Navigator.of(context).pop();
-      };
+        if (!forced) _close();
+      });
+    } else if (phase == UpdatePhase.downloading) {
+      if (!forced) action(context.tr('update_background'), _close);
+      action(context.tr('cancel_download'), () => t!.cancel());
+    } else if (phase == UpdatePhase.userMirrorsFailed) {
+      action(context.tr('cancel'), forced ? () => t!.start() : _close);
+      if (mode == MirrorMode.auto) action(context.tr('update_use_builtin'), () => t!.start(builtIn: true));
+    } else if (phase == UpdatePhase.done) {
+      if (!forced) action(context.tr('update_later'), _close);
+      action(context.tr(Platform.isAndroid ? 'update_install' : 'update_open'), () async {
+        await t!.install();
+        if (mounted && !Platform.isAndroid && t.openResult != 'need_permission' && !forced) _close();
+      });
     } else {
-      primary = context.tr(Platform.isAndroid ? 'update_download_install' : 'update_download');
-      onPrimary = _resolved ? _download : null;
+      if (!forced) action(context.tr('update_later'), _close);
+      action(
+        context.tr(phase == UpdatePhase.failed ? 'retry' : (Platform.isAndroid ? 'update_download_install' : 'update_download')),
+        t == null || phase == UpdatePhase.probing ? null : () => t.start(),
+      );
     }
-    return AlertDialog(
-      title: context.tr('update_available', {'v': r.tag}),
-      actions: [
-        TextButton(
-          onPressed: () {
-            _cancel?.complete();
-            Navigator.of(context).pop();
-          },
-          child: Text(context.tr('update_later')),
-        ),
-        TextButton(onPressed: onPrimary, child: Text(primary)),
-      ],
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
-        Text(context.tr('update_versions', {'cur': widget.current, 'new': r.version}), style: label),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 280),
-          child: SingleChildScrollView(child: Text(notes, style: AppTextStyle.subheadline.of(context))),
-        ),
-        Row(spacing: 8, children: [
-          Expanded(
-            child: Text(_asset == null ? '' : '${_asset!.name} · ${_mb(_asset!.size)} MB',
-                overflow: TextOverflow.ellipsis, style: label),
+
+    String? status;
+    Color? statusColor;
+    if (phase == UpdatePhase.userMirrorsFailed) {
+      status = context.tr('update_user_mirrors_failed_desc');
+      statusColor = context.colorScheme.error;
+    } else if (phase == UpdatePhase.failed && t?.error != null) {
+      status = updateErrorText(context, t!.error!);
+      statusColor = context.colorScheme.error;
+    } else if (phase == UpdatePhase.done && t?.openResult == 'need_permission') {
+      status = context.tr('update_need_install_permission');
+      statusColor = context.colorScheme.error;
+    } else if (phase == UpdatePhase.done && t?.openResult == 'revealed') {
+      status = context.tr('update_saved', {'path': t!.file!.path});
+    } else if (phase == UpdatePhase.done && t?.openResult == 'error') {
+      status = context.tr('update_open_failed', {'path': t!.file!.path});
+      statusColor = context.colorScheme.error;
+    }
+
+    final sourceText = t == null
+        ? ''
+        : phase == UpdatePhase.probing
+            ? context.tr('update_source_testing')
+            : t.source == null
+                ? ''
+                : context.tr('update_source_using', {'s': t.sourceLabel(t.source!)});
+
+    return PopScope(
+      canPop: !forced,
+      child: AlertDialog(
+        title: context.tr(forced ? 'update_forced_title' : 'update_available', {'v': r.tag}),
+        actions: actions,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 10, children: [
+          if (forced)
+            Text(context.tr('update_forced_desc', {'min': r.minSupportedVersion ?? ''}),
+                style: label.copyWith(color: context.colorScheme.error)),
+          Text(context.tr('update_versions', {'cur': widget.current, 'new': r.version}), style: label),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: SingleChildScrollView(child: Text(notes, style: AppTextStyle.subheadline.of(context))),
           ),
-          PressRegion(
-            onTap: () => launchUrl(Uri.parse(r.pageUrl), mode: LaunchMode.externalApplication),
-            child: Text(context.tr('update_open_page'), style: label.copyWith(color: context.colorScheme.primary)),
-          ),
+          Row(spacing: 8, children: [
+            Expanded(
+              child: Text(_asset == null ? '' : '${_asset!.name} · ${UpdateDownloader.mb(_asset!.size)} MB',
+                  overflow: TextOverflow.ellipsis, style: label),
+            ),
+            PressRegion(
+              onTap: () => launchUrl(Uri.parse(r.pageUrl), mode: LaunchMode.externalApplication),
+              child: Text(context.tr('update_open_page'), style: label.copyWith(color: context.colorScheme.primary)),
+            ),
+          ]),
+          if (t != null)
+            Row(spacing: 8, children: [
+              Expanded(child: Text(sourceText, overflow: TextOverflow.ellipsis, style: label)),
+              if (!t.downloading && phase != UpdatePhase.probing)
+                PressRegion(
+                  onTap: _pickSource,
+                  child: Text(context.tr('update_source_switch'), style: label.copyWith(color: context.colorScheme.primary)),
+                ),
+            ]),
+          if (phase == UpdatePhase.downloading) ...[
+            LinearProgressIndicator(value: t!.total > 0 ? t.received / t.total : null),
+            Text(
+              [
+                if (t.total > 0) '${(t.received * 100 ~/ t.total)}%',
+                t.total > 0
+                    ? '${UpdateDownloader.mb(t.received)} / ${UpdateDownloader.mb(t.total)} MB'
+                    : '${UpdateDownloader.mb(t.received)} MB',
+                UpdateDownloader.speedText(t.speed),
+              ].join(' · '),
+              style: label,
+            ),
+          ],
+          if (status != null) Text(status, style: statusColor == null ? label : label.copyWith(color: statusColor)),
         ]),
-        if (_downloading) ...[
-          LinearProgressIndicator(value: _progress),
-          if (_progressText != null) Text(_progressText!, style: label),
-        ],
-        if (_error != null) Text(_error!, style: label.copyWith(color: context.colorScheme.error)),
-      ]),
+      ),
     );
   }
 }
