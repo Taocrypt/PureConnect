@@ -53,6 +53,11 @@ END
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
+// The other selectable icons (theme page), listed by the shortcut
+// "Change Icon" dialog as icons 2-4 of pureconnect.exe.
+IDI_APP_ICON_A2         ICON                    "resources\\app_icon_a2.ico"
+IDI_APP_ICON_B1         ICON                    "resources\\app_icon_b1.ico"
+IDI_APP_ICON_B2         ICON                    "resources\\app_icon_b2.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////

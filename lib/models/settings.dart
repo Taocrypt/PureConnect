@@ -122,6 +122,20 @@ class AppSettings {
       Platform.isAndroid ? TrafficMode.tun : TrafficMode.systemProxy;
 
   TrafficMode trafficMode;
+
+  /// Whether connecting in [mode] points the OS system proxy at the core's
+  /// HTTP/SOCKS ports (desktop only). System-proxy mode always does. Desktop
+  /// TUN does too when an external proxy is set: the TUN device only carries
+  /// campus routes, so other traffic never reached the core and the external
+  /// proxy was never used; through the system proxy, campus traffic still
+  /// goes to the VPN and everything else to the external proxy.
+  bool setsSystemProxy(TrafficMode mode, {required bool android}) {
+    if (android) return false;
+    if (httpPort <= 0 && socksPort <= 0) return false;
+    return mode == TrafficMode.systemProxy ||
+        (mode == TrafficMode.tun && dialDirectProxy.trim().isNotEmpty);
+  }
+
   bool allowLan;
   int socksPort; // 0 = off
   int httpPort; // 0 = off

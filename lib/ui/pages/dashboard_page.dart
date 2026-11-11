@@ -87,7 +87,6 @@ class DashboardPage extends ConsumerWidget {
             box(2, const _DnsCard(), h: 206),
             box(4, const _ModeCard()),
             box(4, const _TopologyCard()),
-            box(4, const _ForwardCard(), h: 186),
             box(4, const _RecentLogsCard(height: 290)),
           ]),
         );
@@ -419,36 +418,6 @@ class _DnsCard extends ConsumerWidget {
         row(context.tr('dns_remote_short'), primary),
         row(context.tr('dns_secondary_short'),
             session?.secondaryDns.isNotEmpty == true ? session!.secondaryDns : s.secondaryDnsServer),
-      ]),
-    );
-  }
-}
-
-class _ForwardCard extends ConsumerWidget {
-  const _ForwardCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final list = ref.watch(settingsProvider.select((s) => s.portForwards));
-    return DashboardCard(
-      onTap: () => ref.read(currentTabProvider.notifier).go(AppTab.tools),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 8, children: [
-        DashboardCardHeader(glyph: AppGlyphs.swap, title: context.tr('port_forwarding'), chevron: true),
-        const SizedBox(height: 2),
-        if (list.isEmpty)
-          Text(context.tr('empty'), style: DashboardText.label(context))
-        else
-          for (final f in list.take(2))
-            DashboardBlock(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              child: Row(spacing: 8, children: [
-                DashboardChip(label: f.network.toUpperCase()),
-                Expanded(
-                  child: Text('${f.bind} → ${f.remote}',
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: DashboardText.label(context)),
-                ),
-              ]),
-            ),
       ]),
     );
   }

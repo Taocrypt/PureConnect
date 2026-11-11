@@ -6,7 +6,8 @@ package main
 //   - upstream's own log lines (proxy / desktop TUN): "host -> ip" from the
 //     resolver, "ip:port -> VPN|DIRECT|PROXY[..]" from the dialer and
 //     "ACL: refusing ip:port/net" from the client-side whitelist;
-//   - the Android TUN pump (tun_android.go), which sees every packet.
+//   - packets: the Android TUN pump (tun_android.go) and the desktop TUN
+//     stack's tunnel connection (tun_flows.go) see every packet.
 //
 // Every flowInterval the tracker emits a "flows" event with the destinations
 // seen in the last flowWindow, aggregated by (destination, route).
@@ -60,6 +61,9 @@ type flowTracker struct {
 	dirty   bool
 	stop    chan struct{}
 	stopped bool
+	// packetVPN: VPN traffic is observed packet by packet (TUN stacks), so
+	// the dialer's "-> VPN" log lines would count it twice.
+	packetVPN bool
 }
 
 var flows *flowTracker
@@ -79,6 +83,15 @@ func (t *flowTracker) reset() {
 	t.flows = map[flowKey]*flowEntry{}
 	t.byDst = map[string]flowKey{}
 	t.dirty = true
+	t.mu.Unlock()
+}
+
+func (t *flowTracker) setPacketVPN(v bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.packetVPN = v
 	t.mu.Unlock()
 }
 
@@ -265,6 +278,14 @@ func (t *flowTracker) observeLog(line string) {
 	}
 	if m := reDial.FindStringSubmatch(line); m != nil {
 		route := routeVPN
+		if m[2] == "VPN" {
+			t.mu.Lock()
+			skip := t.packetVPN
+			t.mu.Unlock()
+			if skip {
+				return
+			}
+		}
 		switch {
 		case m[2] == "DIRECT":
 			route = routeDirect

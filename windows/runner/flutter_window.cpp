@@ -1,15 +1,21 @@
 #include "flutter_window.h"
 
 #include <wininet.h>
+#include <knownfolders.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 
 #include <cwchar>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "resource.h"
 
 namespace {
 
@@ -165,6 +171,100 @@ ProxySnapshot SnapshotFromMap(const EncodableMap& map) {
   return s;
 }
 
+
+// Number of app icons embedded in pureconnect.exe (Runner.rc).
+constexpr int kAppIconCount = 4;
+
+std::wstring ModulePath() {
+  wchar_t buf[MAX_PATH * 4];
+  const DWORD n = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf));
+  return std::wstring(buf, n);
+}
+
+std::wstring KnownFolder(REFKNOWNFOLDERID id) {
+  PWSTR path = nullptr;
+  std::wstring out;
+  if (SUCCEEDED(SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &path))) {
+    out = path;
+  }
+  CoTaskMemFree(path);
+  return out;
+}
+
+// Points every PureConnect shortcut (.lnk whose target is this exe) in the
+// Start Menu, on the desktop and pinned to the taskbar at icon [index] of
+// pureconnect.exe. Explorer takes the taskbar / Start icon from the shortcut
+// the app was started from, not from WM_SETICON, so this is what makes the
+// choice stick there (after the next start). Shortcuts in all-users folders
+// need administrator rights; those are counted as failed.
+EncodableMap UpdateShortcutIcons(int index) {
+  int updated = 0, failed = 0, found = 0;
+  const std::wstring exe = ModulePath();
+  std::vector<std::wstring> roots = {
+      KnownFolder(FOLDERID_Programs), KnownFolder(FOLDERID_CommonPrograms),
+      KnownFolder(FOLDERID_Desktop), KnownFolder(FOLDERID_PublicDesktop),
+  };
+  const std::wstring appdata = KnownFolder(FOLDERID_RoamingAppData);
+  if (!appdata.empty()) {
+    roots.push_back(appdata +
+                    L"\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned");
+  }
+  IShellLinkW* link = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&link)))) {
+    return EncodableMap{{EncodableValue("updated"), EncodableValue(0)},
+                        {EncodableValue("failed"), EncodableValue(-1)},
+                        {EncodableValue("found"), EncodableValue(0)}};
+  }
+  IPersistFile* file = nullptr;
+  link->QueryInterface(IID_PPV_ARGS(&file));
+  namespace fs = std::filesystem;
+  for (const auto& root : roots) {
+    if (root.empty() || file == nullptr) continue;
+    std::error_code ec;
+    fs::recursive_directory_iterator it(
+        root, fs::directory_options::skip_permission_denied, ec), end;
+    for (; !ec && it != end; it.increment(ec)) {
+      if (it.depth() > 3) {
+        it.disable_recursion_pending();
+        continue;
+      }
+      const fs::path& p = it->path();
+      if (_wcsicmp(p.extension().c_str(), L".lnk") != 0) continue;
+      if (FAILED(file->Load(p.c_str(), STGM_READWRITE))) continue;
+      wchar_t target[MAX_PATH * 4] = {0};
+      if (FAILED(link->GetPath(target, ARRAYSIZE(target), nullptr, SLGP_RAWPATH)) ||
+          _wcsicmp(target, exe.c_str()) != 0) {
+        continue;
+      }
+      found++;
+      wchar_t icon_path[MAX_PATH * 4] = {0};
+      int icon_index = 0;
+      link->GetIconLocation(icon_path, ARRAYSIZE(icon_path), &icon_index);
+      const bool same = icon_index == index &&
+                        (_wcsicmp(icon_path, exe.c_str()) == 0 ||
+                         (icon_path[0] == 0 && index == 0));
+      if (same) {
+        updated++;
+        continue;
+      }
+      if (SUCCEEDED(link->SetIconLocation(exe.c_str(), index)) &&
+          SUCCEEDED(file->Save(p.c_str(), TRUE))) {
+        updated++;
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, p.c_str(), nullptr);
+      } else {
+        failed++;
+      }
+    }
+  }
+  if (file != nullptr) file->Release();
+  link->Release();
+  if (updated > 0) SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+  return EncodableMap{{EncodableValue("updated"), EncodableValue(updated)},
+                      {EncodableValue("failed"), EncodableValue(failed)},
+                      {EncodableValue("found"), EncodableValue(found)}};
+}
+
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
@@ -226,8 +326,24 @@ void FlutterWindow::HandleWindowCall(
   const EncodableValue* args = call.arguments();
 
   if (method == "setIcon") {
+    // An int is the index of an icon embedded in pureconnect.exe; a string
+    // a .ico file (kept for compatibility).
+    const auto* index = args ? std::get_if<int>(args) : nullptr;
     const auto* path = args ? std::get_if<std::string>(args) : nullptr;
-    result->Success(EncodableValue(path != nullptr && SetIconFromFile(*path)));
+    bool ok = false;
+    if (index != nullptr) {
+      ok = SetIconFromResource(*index);
+    } else if (path != nullptr) {
+      ok = SetIconFromFile(*path);
+    }
+    result->Success(EncodableValue(ok));
+  } else if (method == "setShortcutIcon") {
+    const auto* index = args ? std::get_if<int>(args) : nullptr;
+    if (index == nullptr || *index < 0 || *index >= kAppIconCount) {
+      result->Success(EncodableValue());
+    } else {
+      result->Success(EncodableValue(UpdateShortcutIcons(*index)));
+    }
   } else if (method == "show") {
     start_hidden_ = false;
     ShowAndFocus();
@@ -263,6 +379,19 @@ void FlutterWindow::HandleWindowCall(
   }
 }
 
+bool FlutterWindow::SetIconFromResource(int index) {
+  if (index < 0 || index >= kAppIconCount) return false;
+  HINSTANCE module = GetModuleHandle(nullptr);
+  HICON big_icon = static_cast<HICON>(LoadImageW(
+      module, MAKEINTRESOURCEW(IDI_APP_ICON + index), IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+  HICON small_icon = static_cast<HICON>(LoadImageW(
+      module, MAKEINTRESOURCEW(IDI_APP_ICON + index), IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+      LR_DEFAULTCOLOR));
+  return ApplyIcons(big_icon, small_icon);
+}
+
 bool FlutterWindow::SetIconFromFile(const std::string& path) {
   const std::wstring wpath = Utf8ToWide(path);
   HICON big_icon = static_cast<HICON>(
@@ -276,9 +405,28 @@ bool FlutterWindow::SetIconFromFile(const std::string& path) {
     if (small_icon) DestroyIcon(small_icon);
     return false;
   }
+  return ApplyIcons(big_icon, small_icon);
+}
+
+// Title bar, Alt+Tab and the running taskbar button (when not resolved to a
+// shortcut) read the window icons; the class icons back them up for windows
+// Windows creates from the class (e.g. after DPI changes).
+bool FlutterWindow::ApplyIcons(HICON big_icon, HICON small_icon) {
+  if (!big_icon || !small_icon) {
+    if (big_icon) DestroyIcon(big_icon);
+    if (small_icon) DestroyIcon(small_icon);
+    return false;
+  }
   HWND hwnd = GetHandle();
+  if (hwnd == nullptr) {
+    DestroyIcon(big_icon);
+    DestroyIcon(small_icon);
+    return false;
+  }
   SendMessage(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big_icon));
   SendMessage(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small_icon));
+  SetClassLongPtr(hwnd, GCLP_HICON, reinterpret_cast<LONG_PTR>(big_icon));
+  SetClassLongPtr(hwnd, GCLP_HICONSM, reinterpret_cast<LONG_PTR>(small_icon));
   if (big_icon_) DestroyIcon(big_icon_);
   if (small_icon_) DestroyIcon(small_icon_);
   big_icon_ = big_icon;

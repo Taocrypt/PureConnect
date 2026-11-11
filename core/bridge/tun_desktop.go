@@ -20,7 +20,9 @@ func runAndroidTun(em *emitter, conf configs.Config, opts startOptions, vpnClien
 // newSystemTunStack creates upstream's TUN device (needs root/administrator)
 // and installs the same routes upstream main.go would.
 func newSystemTunStack(conf configs.Config, vpnClient client.Client, r resources) (stack.Stack, error) {
-	s, err := tun.NewStack(vpnClient, conf.DNSHijack, conf.FakeIP, r.ipResources)
+	// The stack bypasses the dialer, so observe its tunnel traffic for the
+	// connection topology.
+	s, err := tun.NewStack(newFlowClient(vpnClient, flows), conf.DNSHijack, conf.FakeIP, r.ipResources)
 	if err != nil {
 		return nil, fmt.Errorf("TUN stack setup error (run as root/administrator): %w", err)
 	}

@@ -47,10 +47,24 @@ class DesktopShell {
     if (Platform.isMacOS && ref.read(settingsProvider).hideDockIcon) {
       await DesktopWindow.setDockIconVisible(false);
     }
-    _traySub ??= Tray.instance.events.listen((e) {
-      if (e is TrayIconActivated) DesktopWindow.show();
-    });
+    _traySub ??= Tray.instance.events.listen(handleTrayEvent);
     await refreshTray();
+  }
+
+  /// Tray clicks. The Windows and macOS tray plugin never pops its menu by
+  /// itself: a right click (and on macOS any click) only reports
+  /// [TrayMenuRequested], and the app has to ask for the menu. Linux
+  /// (AppIndicator) shows the menu natively and sends no such event.
+  @visibleForTesting
+  void handleTrayEvent(TrayEvent e, {Future<void> Function()? openMenu}) {
+    switch (e) {
+      case TrayIconActivated():
+        DesktopWindow.show();
+      case TrayMenuRequested():
+        unawaited((openMenu ?? Tray.instance.openMenu)().catchError((_) {}));
+      case TrayMenuItemSelected():
+        break;
+    }
   }
 
   Future<dynamic> _onNative(MethodCall call) async {

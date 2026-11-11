@@ -324,7 +324,9 @@ Future<void> toggleConnection(BuildContext context, WidgetRef ref) async {
       }
     }
   }
-  if (s.trafficMode == TrafficMode.systemProxy && SystemProxy.supported && s.warnProxyOverride) {
+  if (s.setsSystemProxy(s.trafficMode, android: Platform.isAndroid) &&
+      SystemProxy.supported &&
+      s.warnProxyOverride) {
     final other = await SystemProxy.foreignProxy(ref.read(dataDirProvider));
     if (other != null) {
       if (!context.mounted) return;

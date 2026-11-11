@@ -12,7 +12,6 @@ package main
 
 import (
 	"encoding/binary"
-	"errors"
 	"io"
 	"log"
 	"net"
@@ -21,7 +20,6 @@ import (
 
 	"github.com/mythologyli/zju-connect/client"
 	"github.com/mythologyli/zju-connect/internal/ipresource"
-	"golang.org/x/net/dns/dnsmessage"
 )
 
 type androidPump struct {
@@ -163,46 +161,5 @@ func (p *androidPump) warnDrop(dst, proto string, port int) {
 // observeInbound counts download bytes and learns names from DNS answers
 // that come back through the tunnel.
 func (p *androidPump) observeInbound(pkt []byte) {
-	if len(pkt) < 20 || pkt[0]>>4 != 4 {
-		return
-	}
-	src := net.IP(pkt[12:16]).String()
-	flows.recordDown(src, int64(len(pkt)))
-	ihl := int(pkt[0]&0x0f) * 4
-	if pkt[9] != 17 || len(pkt) < ihl+8 || binary.BigEndian.Uint16(pkt[ihl:]) != 53 {
-		return
-	}
-	parseDNSAnswers(pkt[ihl+8:])
-}
-
-func parseDNSAnswers(b []byte) {
-	var parser dnsmessage.Parser
-	if _, err := parser.Start(b); err != nil {
-		return
-	}
-	q, err := parser.Question()
-	if err != nil {
-		return
-	}
-	if err := parser.SkipAllQuestions(); err != nil {
-		return
-	}
-	for {
-		h, err := parser.AnswerHeader()
-		if err != nil {
-			_ = errors.Is(err, dnsmessage.ErrSectionDone)
-			return
-		}
-		if h.Type == dnsmessage.TypeA {
-			a, err := parser.AResource()
-			if err != nil {
-				return
-			}
-			flows.learnName(net.IP(a.A[:]).String(), q.Name.String())
-			continue
-		}
-		if err := parser.SkipAnswer(); err != nil {
-			return
-		}
-	}
+	flows.observeInboundPacket(pkt)
 }

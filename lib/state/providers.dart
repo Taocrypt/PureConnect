@@ -676,8 +676,8 @@ class CoreController extends Notifier<CoreStatus> {
 
   Future<void> _applySystemProxy() async {
     final s = ref.read(settingsProvider);
-    if (Platform.isAndroid || state.trafficMode != TrafficMode.systemProxy) return;
-    if (s.httpPort <= 0 && s.socksPort <= 0) return;
+    final mode = state.trafficMode;
+    if (mode == null || !s.setsSystemProxy(mode, android: Platform.isAndroid)) return;
     try {
       _systemProxySet = true;
       await SystemProxy.enable(

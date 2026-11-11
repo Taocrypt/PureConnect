@@ -47,6 +47,8 @@ class FlutterWindow : public Win32Window {
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   bool SetIconFromFile(const std::string& path);
+  bool SetIconFromResource(int index);
+  bool ApplyIcons(HICON big_icon, HICON small_icon);
   void ShowAndFocus();
   void Notify(const std::string& method);
 

@@ -42,6 +42,9 @@ for v in variants:
     open(f'{res}/values/{name}_background.xml','w').write(f'<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="{name}_background">{bgc}</color>\n</resources>\n')
     full.resize((512,512),Image.LANCZOS).save(f"assets/icon/{v}.png")
     full.resize((256,256),Image.LANCZOS).save(f'assets/icon/{v}.ico',sizes=ICO)
+    if v!='a1':
+        # Embedded in pureconnect.exe (Runner.rc) as icons 2-4.
+        full.resize((256,256),Image.LANCZOS).save(f'windows/runner/resources/app_icon_{v}.ico',sizes=ICO)
     if v=='a1':
         full.resize((1024,1024),Image.LANCZOS).save('assets/icon/pureconnect_1024.png')
         full.resize((256,256),Image.LANCZOS).save('windows/runner/resources/app_icon.ico',sizes=ICO)

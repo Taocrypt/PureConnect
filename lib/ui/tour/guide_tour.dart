@@ -208,6 +208,84 @@ RRect guideLensFor(Rect r) {
   return RRect.fromRectAndRadius(o, Radius.circular(math.min(o.height / 2, 26)));
 }
 
+/// The magnifier handle: where it leaves the lens rim and which way it goes.
+typedef GuideHandle = ({Offset start, Offset dir, double length});
+
+/// The magnifier's handle points from the lens at the tip [bubble] (the
+/// bubble's real laid-out rect, so it follows above/below placement,
+/// clamping at screen edges, keyboard shifts and scrolling). It starts on
+/// the lens rim, heads for the nearest point of the bubble and stops short
+/// of it. Without a bubble rect it falls back to whichever corner has room.
+/// Returns null when there is nowhere sensible to draw it (bubble over the
+/// lens centre, or no room before the bubble or the screen edge).
+GuideHandle? guideHandleFor(RRect hole, Rect? bubble, Size size, {double maxLength = 26}) {
+  final screen = (Offset.zero & size).deflate(4);
+  final c = hole.center;
+  final rad = math.min(hole.tlRadius.x, math.min(hole.width, hole.height) / 2);
+  if (bubble == null) {
+    for (final (sx, sy) in const [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)]) {
+      final corner = Offset(sx > 0 ? hole.right - rad : hole.left + rad, sy > 0 ? hole.bottom - rad : hole.top + rad);
+      final dir = Offset(sx, sy) / math.sqrt2;
+      final start = corner + dir * (rad + 1.5);
+      if (screen.contains(start + dir * maxLength)) return (start: start, dir: dir, length: maxLength);
+    }
+    return null;
+  }
+  if (bubble.contains(c)) return null;
+  final target = Offset(c.dx.clamp(bubble.left, bubble.right), c.dy.clamp(bubble.top, bubble.bottom));
+  final v = target - c;
+  if (v.distance < 1e-6) return null;
+  final dir = v / v.distance;
+  // Leave the rim: hit the rect along dir, then pull onto the corner arc.
+  final hw = hole.width / 2, hh = hole.height / 2;
+  final tx = dir.dx.abs() < 1e-9 ? double.infinity : hw / dir.dx.abs();
+  final ty = dir.dy.abs() < 1e-9 ? double.infinity : hh / dir.dy.abs();
+  var p = c + dir * math.min(tx, ty);
+  final cc = Offset(
+    p.dx.clamp(hole.left + rad, math.max(hole.left + rad, hole.right - rad)),
+    p.dy.clamp(hole.top + rad, math.max(hole.top + rad, hole.bottom - rad)),
+  );
+  final off = p - cc;
+  if (off.distance > rad && off.distance > 1e-6) p = cc + off / off.distance * rad;
+  final start = p + dir * 1.5;
+  // Room until the bubble (ray entering the rect) and until the screen edge.
+  double room = _rayToRect(start, dir, bubble) - 4;
+  room = math.min(room, _rayInside(start, dir, screen));
+  final length = math.min(maxLength, room);
+  if (length < 6) return null;
+  return (start: start, dir: dir, length: length);
+}
+
+/// Distance along the ray from [o] in [d] until it enters [r] (infinite when
+/// it misses; 0 when [o] is inside).
+double _rayToRect(Offset o, Offset d, Rect r) {
+  if (r.contains(o)) return 0;
+  var tmin = 0.0, tmax = double.infinity;
+  for (final (oo, dd, lo, hi) in [(o.dx, d.dx, r.left, r.right), (o.dy, d.dy, r.top, r.bottom)]) {
+    if (dd.abs() < 1e-9) {
+      if (oo < lo || oo > hi) return double.infinity;
+      continue;
+    }
+    var t1 = (lo - oo) / dd, t2 = (hi - oo) / dd;
+    if (t1 > t2) (t1, t2) = (t2, t1);
+    tmin = math.max(tmin, t1);
+    tmax = math.min(tmax, t2);
+    if (tmin > tmax) return double.infinity;
+  }
+  return tmin;
+}
+
+/// Distance along the ray from [o] (inside [r]) in [d] until it leaves [r].
+double _rayInside(Offset o, Offset d, Rect r) {
+  if (!r.contains(o)) return 0;
+  var t = double.infinity;
+  if (d.dx > 1e-9) t = math.min(t, (r.right - o.dx) / d.dx);
+  if (d.dx < -1e-9) t = math.min(t, (r.left - o.dx) / d.dx);
+  if (d.dy > 1e-9) t = math.min(t, (r.bottom - o.dy) / d.dy);
+  if (d.dy < -1e-9) t = math.min(t, (r.top - o.dy) / d.dy);
+  return t;
+}
+
 /// Dims the app, cuts a lens over the current step's control (which stays
 /// usable), briefly magnifies it, and shows the tip bubble. Sits above the
 /// navigator so it follows the tour across pages.
@@ -235,6 +313,8 @@ class _GuideTourLayerState extends State<GuideTourLayer> with TickerProviderStat
     duration: const Duration(milliseconds: 2400),
   );
 
+  /// Where the tip bubble was laid out (the handle points at it).
+  final ValueNotifier<Rect?> _bubbleRect = ValueNotifier<Rect?>(null);
   GuideStep? _step;
   RRect? _target; // where the lens should be
   RRect? _lens; // where it is (smoothed)
@@ -258,6 +338,7 @@ class _GuideTourLayerState extends State<GuideTourLayer> with TickerProviderStat
   @override
   void dispose() {
     tour.removeListener(_onTour);
+    _bubbleRect.dispose();
     _ticker.dispose();
     _shown.dispose();
     _arrive.dispose();
@@ -407,6 +488,7 @@ class _GuideTourLayerState extends State<GuideTourLayer> with TickerProviderStat
                 child: CustomPaint(
                   painter: _LensPainter(
                     lens: lens,
+                    bubble: _bubbleRect,
                     shown: shown,
                     arrive: _reduced ? 1 : _arrive.value,
                     ripple: _reduced ? -1 : _ripple.value,
@@ -427,6 +509,7 @@ class _GuideTourLayerState extends State<GuideTourLayer> with TickerProviderStat
                   child: CustomSingleChildLayout(
                     delegate: _BubbleLayout(
                       lens: lens?.outerRect,
+                      onPlaced: _bubbleRect,
                       insets:
                           MediaQuery.paddingOf(context) +
                           EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -476,15 +559,17 @@ class _RenderScrimBlocker extends RenderBox {
 class _LensPainter extends CustomPainter {
   _LensPainter({
     required this.lens,
+    required this.bubble,
     required this.shown,
     required this.arrive,
     required this.ripple,
     required this.scrim,
     required this.ring,
     required this.rim,
-  });
+  }) : super(repaint: bubble);
 
   final RRect? lens;
+  final ValueNotifier<Rect?> bubble;
   final double shown, arrive, ripple;
   final Color scrim, ring, rim;
 
@@ -560,44 +645,38 @@ class _LensPainter extends CustomPainter {
     _handle(canvas, size, hole, a * Curves.easeOut.transform(arrive.clamp(0, 1)));
   }
 
-  /// The magnifier's handle, off whichever corner has room.
+  /// The magnifier's handle, pointing at the tip bubble.
   void _handle(Canvas canvas, Size size, RRect hole, double a) {
     if (a <= 0.01) return;
-    final rad = hole.tlRadius.x;
-    const len = 26.0;
-    for (final (sx, sy) in const [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)]) {
-      final corner = Offset(sx > 0 ? hole.right - rad : hole.left + rad, sy > 0 ? hole.bottom - rad : hole.top + rad);
-      final dir = Offset(sx, sy) / math.sqrt2;
-      final start = corner + dir * (rad + 1.5);
-      final end = start + dir * (len * a);
-      if (!(Offset.zero & size).deflate(4).contains(start + dir * len)) continue;
-      canvas.drawLine(
-        start + dir * 2,
-        end + dir * 2,
-        Paint()
-          ..strokeCap = StrokeCap.round
-          ..strokeWidth = 9
-          ..color = const Color(0xFF000000).withValues(alpha: 0.18 * a)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-      );
-      canvas.drawLine(
-        start,
-        end,
-        Paint()
-          ..strokeCap = StrokeCap.round
-          ..strokeWidth = 8
-          ..color = ring.withValues(alpha: a),
-      );
-      canvas.drawLine(
-        start + dir * 3,
-        start + dir * math.max(3, len * a - 6),
-        Paint()
-          ..strokeCap = StrokeCap.round
-          ..strokeWidth = 2
-          ..color = rim.withValues(alpha: 0.35 * a),
-      );
-      return;
-    }
+    final h = guideHandleFor(hole, bubble.value, size);
+    if (h == null) return;
+    final (:start, :dir, :length) = h;
+    final end = start + dir * (length * a);
+    canvas.drawLine(
+      start + dir * 2,
+      end + dir * 2,
+      Paint()
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 9
+        ..color = const Color(0xFF000000).withValues(alpha: 0.18 * a)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+    canvas.drawLine(
+      start,
+      end,
+      Paint()
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 8
+        ..color = ring.withValues(alpha: a),
+    );
+    canvas.drawLine(
+      start + dir * 3,
+      start + dir * math.max(3, length * a - 6),
+      Paint()
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 2
+        ..color = rim.withValues(alpha: 0.35 * a),
+    );
   }
 
   static RRect _scale(RRect r, double s) {
@@ -619,8 +698,11 @@ class _LensPainter extends CustomPainter {
 /// Places the tip below the lens when it fits, else above, else centred;
 /// keeps clear of system bars and the keyboard.
 class _BubbleLayout extends SingleChildLayoutDelegate {
-  _BubbleLayout({required this.lens, required this.insets});
+  _BubbleLayout({required this.lens, required this.insets, this.onPlaced});
   final Rect? lens;
+
+  /// Receives the bubble's rect after each layout (for the lens handle).
+  final ValueNotifier<Rect?>? onPlaced;
   final EdgeInsets insets;
 
   static const _gap = 18.0;
@@ -638,6 +720,12 @@ class _BubbleLayout extends SingleChildLayoutDelegate {
 
   @override
   Offset getPositionForChild(Size size, Size child) {
+    final o = _position(size, child);
+    onPlaced?.value = lens == null ? null : o & child;
+    return o;
+  }
+
+  Offset _position(Size size, Size child) {
     final top = insets.top + _margin;
     final bottom = size.height - insets.bottom - _margin;
     final l = lens;

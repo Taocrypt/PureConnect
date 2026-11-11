@@ -246,12 +246,21 @@ class _AppIconPickerState extends ConsumerState<_AppIconPicker> {
     if (_busy || id == current) return;
     setState(() => _busy = true);
     final ok = await applyAppIcon(id);
+    final shortcuts = await applyWindowsShortcutIcon(id);
     ref.read(settingsProvider.notifier).update((x) => x.appIcon = id);
     if (!mounted) return;
     setState(() {
       _busy = false;
       if (Platform.isAndroid && ok) _launcher = id;
     });
+    if (shortcuts != null && shortcuts.needsManual) {
+      // Some shortcut is out of reach (all-users Start Menu needs admin) or
+      // none was found: say how to change it by hand.
+      await notice(context,
+          title: context.tr('app_icon'),
+          message: context.tr('app_icon_manual_windows', {'n': '${windowsIconIndex(id) + 1}'}));
+      return;
+    }
     showToast(context, context.tr(ok ? 'app_icon_changed' : 'app_icon_failed'),
         level: ok ? BannerLevel.info : BannerLevel.warning);
   }
@@ -260,7 +269,8 @@ class _AppIconPickerState extends ConsumerState<_AppIconPicker> {
   Widget build(BuildContext context) {
     final current = _launcher ?? ref.watch(settingsProvider.select((s) => s.appIcon));
     final cs = context.colorScheme;
-    return SettingsGroup(footer: context.tr('app_icon_hint'), children: [
+    final windows = Platform.isWindows;
+    return SettingsGroup(footer: context.tr(windows ? 'app_icon_hint_windows' : 'app_icon_hint'), children: [
       Padding(
         padding: const EdgeInsets.all(16),
         child: Wrap(spacing: 14, runSpacing: 14, alignment: WrapAlignment.spaceEvenly, children: [
@@ -282,6 +292,19 @@ class _AppIconPickerState extends ConsumerState<_AppIconPicker> {
                 ),
               ),
             ),
+        ]),
+      ),
+      // Windows: the icons' numbers in pureconnect.exe ("Change Icon").
+      if (windows)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Wrap(spacing: 14, runSpacing: 6, alignment: WrapAlignment.spaceEvenly, children: [
+            for (final id in appIcons)
+              SizedBox(
+                width: 72,
+                child: Text(context.tr('app_icon_number', {'n': '${windowsIconIndex(id) + 1}'}),
+                    textAlign: TextAlign.center, style: DashboardText.label(context)),
+              ),
         ]),
       ),
     ]);
