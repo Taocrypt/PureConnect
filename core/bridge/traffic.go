@@ -9,7 +9,7 @@ import (
 
 // Traffic through the core: bytes on the underlay connections to the VPN
 // server. Reset whenever a new connection starts; a "traffic" event is
-// emitted every second while connected.
+// emitted every second while connected (with the core's memory use).
 
 var trafficActive atomic.Bool
 
@@ -49,7 +49,7 @@ func startTrafficLoop(em *emitter) {
 				rxRate = uint64(float64(rx-lastRx) / secs)
 			}
 			lastTx, lastRx, last = tx, rx, now
-			em.emit(Event{Type: "traffic", Traffic: &TrafficInfo{Tx: tx, Rx: rx, TxRate: txRate, RxRate: rxRate}})
+			em.emit(Event{Type: "traffic", Traffic: &TrafficInfo{Tx: tx, Rx: rx, TxRate: txRate, RxRate: rxRate, Mem: processRSS()}})
 		}
 	}()
 }

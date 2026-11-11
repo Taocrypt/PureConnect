@@ -353,6 +353,9 @@ func runSession(em *emitter, conf configs.Config, opts startOptions, handler *ui
 	if opts.Tun == "android_fd" {
 		return runAndroidTun(em, conf, opts, vpnClient, r)
 	}
+	// The stacks reach the tunnel through this client so a dead tunnel ends
+	// the session with its reason instead of a panic (session_guard.go).
+	stackClient := newGuardClient(vpnClient)
 
 	var vpnStack stack.Stack
 	stackName := "gvisor"
@@ -364,11 +367,11 @@ func runSession(em *emitter, conf configs.Config, opts startOptions, handler *ui
 		}
 	case conf.TUNMode:
 		stackName = "tun"
-		if vpnStack, err = newSystemTunStack(conf, vpnClient, r); err != nil {
+		if vpnStack, err = newSystemTunStack(conf, stackClient, r); err != nil {
 			return err
 		}
 	default:
-		if vpnStack, err = gvisor.NewStack(vpnClient); err != nil {
+		if vpnStack, err = gvisor.NewStack(stackClient); err != nil {
 			return fmt.Errorf("gVisor stack setup error: %w", err)
 		}
 	}

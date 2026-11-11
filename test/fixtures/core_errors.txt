@@ -324,3 +324,7 @@ core exited with code 2
 TUN mode needs administrator rights (accept the UAC prompt)
 wintun.dll is missing next to zjuconnect-core.exe; reinstall PureConnect
 TUN mode needs root (administrator) rights
+kicked offline: the account signed in on another device
+tunnel closed
+too many receive retries
+L3 tunnel closed

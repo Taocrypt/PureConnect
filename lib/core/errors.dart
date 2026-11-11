@@ -21,6 +21,9 @@ class ErrorRule {
 RegExp _r(String p) => RegExp(p, caseSensitive: false);
 
 final errorRules = <ErrorRule>[
+  // Same account signed in elsewhere (core: session_guard.go). First, so
+  // the "handshake reply" inside it never reads as a generic tunnel error.
+  ErrorRule('kicked', _r(r'kicked offline')),
   // --- user action ---
   ErrorRule('elevation_cancelled', _r(r'administrator authorization cancelled')),
   ErrorRule('wintun_missing', _r(r'wintun\.dll')),
@@ -90,6 +93,7 @@ const _messages = <String, Map<String, String>>{
     'locked': '账号已被服务器临时锁定，请稍后再试',
     'account_disabled': '账号已被禁用或已过期',
     'too_many_online': '该账号在线设备数已达上限',
+    'kicked': '账号已在其他设备登录，本机已被挤下线',
     'missing_credentials': '配置缺少当前认证方式所需的用户名或密码',
     'auth_type': '服务器不支持所选的认证方式或登录域，请检查配置',
     'unsupported_auth': '服务器要求的认证方式暂不支持',
@@ -134,6 +138,7 @@ const _messages = <String, Map<String, String>>{
     'locked': 'The account is temporarily locked by the server. Try later',
     'account_disabled': 'The account is disabled or expired',
     'too_many_online': 'This account has reached its online device limit',
+    'kicked': 'This account signed in on another device; this device was signed out',
     'missing_credentials': 'The profile is missing the username or password this sign-in method needs',
     'auth_type': 'The server does not offer the selected sign-in method or login domain. Check the profile',
     'unsupported_auth': 'The server asked for a sign-in method that is not supported yet',

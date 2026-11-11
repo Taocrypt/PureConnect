@@ -340,7 +340,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val REQ_VPN = 0x5650
         const val REQ_VPN_PROBE = 0x5651
         const val REQ_NOTIFY = 0x4e54

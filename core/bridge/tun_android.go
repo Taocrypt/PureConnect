@@ -50,6 +50,8 @@ func runAndroidTun(em *emitter, conf configs.Config, opts startOptions, vpnClien
 	if err != nil {
 		return fmt.Errorf("open L3 tunnel: %w", err)
 	}
+	// A dead tunnel ends the session with its reason (session_guard.go).
+	l3 = newGuardL3Conn(l3)
 	fp, err := parseFrontProxy(conf.DialDirectProxy)
 	if err != nil {
 		l3.Close()

@@ -347,7 +347,13 @@ class CoreService : VpnService() {
                 "tun_request" -> scope.launch { establishTun(ev.optJSONObject("session")) }
                 "state" -> when (ev.optString("state")) {
                     "connected" -> { connected = true; showConnected(0, 0, 0, 0) }
-                    "stopping", "stopped", "error" -> connected = false
+                    "error" -> {
+                        connected = false
+                        // Kicked by a sign-in on another device: say so even
+                        // when no UI is around (the core then stops itself).
+                        if (ev.optString("error").contains("kicked offline")) showKicked()
+                    }
+                    "stopping", "stopped" -> connected = false
                 }
                 "session" -> ev.optJSONObject("session")?.optString("ip")?.let {
                     if (it.isNotEmpty()) {
@@ -517,6 +523,27 @@ class CoreService : VpnService() {
             .setContentIntent(open)
             .addAction(0, getString(R.string.notify_stop), stop)
             .build()
+    }
+
+    private fun showKicked() {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(MainActivity.ALERT_CHANNEL) == null) {
+            nm.createNotificationChannel(NotificationChannel(
+                MainActivity.ALERT_CHANNEL, getString(R.string.notify_alerts), NotificationManager.IMPORTANCE_DEFAULT))
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val open = PendingIntent.getActivity(this, 3, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val text = getString(R.string.notify_kicked)
+        nm.notify(MainActivity.ALERT_ID, NotificationCompat.Builder(this, MainActivity.ALERT_CHANNEL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("PureConnect")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build())
     }
 
     private fun startForegroundCompat(text: String) {

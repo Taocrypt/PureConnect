@@ -109,6 +109,7 @@ type TrafficInfo struct {
 	Rx     uint64 `json:"rx"`
 	TxRate uint64 `json:"tx_rate"` // bytes/s
 	RxRate uint64 `json:"rx_rate"`
+	Mem    uint64 `json:"mem,omitempty"` // core process memory (RSS), bytes
 }
 
 type SessionInfo struct {

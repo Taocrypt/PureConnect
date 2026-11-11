@@ -18,8 +18,6 @@ class S {
 
   static const _strings = <String, Map<String, String>>{
     'en': {
-      'dns_remote_short': 'Remote',
-      'dns_secondary_short': 'Secondary',
       'tools': 'Tools',
       'running': 'Running',
       'not_running': 'Not running',
@@ -80,6 +78,9 @@ class S {
       'system_apps': 'System',
       'browser': 'Browser for links',
       'app_icon': 'App icon',
+      'memory_info': 'Memory',
+      'memory_app': 'App',
+      'memory_core': 'Core',
       'app_icon_hint': 'Launcher may take a few seconds to refresh',
       'app_icon_changed': 'Icon changed',
       'app_icon_failed': 'Could not change the icon',
@@ -496,8 +497,6 @@ class S {
       'tour_auth_failed': 'Could not reach the server; choose a method yourself',
     },
     'zh': {
-      'dns_remote_short': '远程',
-      'dns_secondary_short': '备用',
       'tools': '工具',
       'running': '运行中',
       'not_running': '未运行',
@@ -558,6 +557,9 @@ class S {
       'system_apps': '系统应用',
       'browser': '打开网址的浏览器',
       'app_icon': '应用图标',
+      'memory_info': '内存',
+      'memory_app': '应用',
+      'memory_core': '内核',
       'app_icon_hint': '桌面图标可能需要几秒后刷新',
       'app_icon_changed': '图标已更换',
       'app_icon_failed': '图标更换失败',

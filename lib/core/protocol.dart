@@ -297,14 +297,18 @@ class FlowInfo {
 /// Bytes through the core (to/from the VPN server) since this connection
 /// started, and the current rates in bytes/s.
 class TrafficStats {
-  const TrafficStats({this.tx = 0, this.rx = 0, this.txRate = 0, this.rxRate = 0});
+  const TrafficStats({this.tx = 0, this.rx = 0, this.txRate = 0, this.rxRate = 0, this.mem = 0});
   final int tx, rx, txRate, rxRate;
+
+  /// Memory of the core process (RSS, bytes); 0 when unknown.
+  final int mem;
   static const zero = TrafficStats();
   factory TrafficStats.fromJson(Map<String, dynamic> j) => TrafficStats(
         tx: (j['tx'] as num?)?.toInt() ?? 0,
         rx: (j['rx'] as num?)?.toInt() ?? 0,
         txRate: (j['tx_rate'] as num?)?.toInt() ?? 0,
         rxRate: (j['rx_rate'] as num?)?.toInt() ?? 0,
+        mem: (j['mem'] as num?)?.toInt() ?? 0,
       );
 }
 

@@ -89,6 +89,12 @@ func main() {
 		})
 	}
 
+	// A dead tunnel (e.g. kicked offline) ends the session cleanly.
+	setFatalHook(func(err error) {
+		em.state("error", err)
+		go shutdown(1)
+	})
+
 	commands := make(chan Command, 4)
 	go func() {
 		sc := bufio.NewScanner(protocolIn)

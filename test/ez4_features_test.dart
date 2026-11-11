@@ -107,6 +107,10 @@ void main() {
     expect(CoreController.isReconnectable('session is invalid'), isTrue);
     expect(CoreController.isReconnectable('invalid username or password'), isFalse);
     expect(CoreController.isReconnectable('authentication cancelled by user'), isFalse);
+    // Kicked by a sign-in elsewhere: reconnecting would kick the other device.
+    expect(CoreController.isReconnectable(
+        'kicked offline: the account signed in on another device (unexpected recv handshake reply (0x00))'), isFalse);
+    expect(CoreController.isReconnectable('tunnel closed: EOF'), isTrue);
   });
 
   group('system proxy', () {

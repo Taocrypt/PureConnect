@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -12,6 +13,7 @@ import '../../l10n/strings.dart';
 import '../../models/profile.dart';
 import '../../models/settings.dart';
 import '../../core/errors.dart';
+import '../../core/memory_info.dart';
 import '../../state/providers.dart';
 import '../home_shell.dart';
 import '../kit/app_glyphs.dart';
@@ -84,7 +86,7 @@ class DashboardPage extends ConsumerWidget {
           padding: EdgeInsets.fromLTRB(hPad, 4, hPad, bottom),
           child: Wrap(spacing: gap, runSpacing: gap, children: [
             box(2, const _StatusCard(), h: 206),
-            box(2, const _DnsCard(), h: 206),
+            box(2, const _MemoryCard(), h: 206),
             box(4, const _ModeCard()),
             box(4, const _TopologyCard()),
             box(4, const _RecentLogsCard(height: 290)),
@@ -389,35 +391,90 @@ class _ModeCard extends ConsumerWidget {
 // Small cards
 // ---------------------------------------------------------------------------
 
-class _DnsCard extends ConsumerWidget {
-  const _DnsCard();
+/// Memory of the app and the core, after FlClash's memory card: total,
+/// a stacked bar and a legend; refreshed every 2 s.
+class _MemoryCard extends ConsumerStatefulWidget {
+  const _MemoryCard();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final session = ref.watch(coreProvider.select((s) => s.session));
-    final s = ref.watch(settingsProvider);
-    final primary = session?.dnsServer.isNotEmpty == true
-        ? session!.dnsServer
-        : (s.disableRemoteDns ? context.tr('off') : s.remoteDnsServer);
-    Widget row(String label, String value) => DashboardBlock(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(children: [
-            Expanded(child: Text(label, style: DashboardText.label(context))),
-            Flexible(
-              child: Text(value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyle.subheadline.of(context, emphasized: true).toTabular),
-            ),
-          ]),
-        );
+  ConsumerState<_MemoryCard> createState() => _MemoryCardState();
+}
+
+class _MemoryCardState extends ConsumerState<_MemoryCard> {
+  Timer? _timer;
+  MemorySnapshot _m = MemorySnapshot.empty;
+
+  @override
+  void initState() {
+    super.initState();
+    _poll();
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+  }
+
+  void _poll() {
+    if (!mounted) return;
+    final st = ref.read(coreProvider);
+    final core = st.isActive ? ref.read(trafficProvider).mem : 0;
+    final next = MemorySnapshot.read(core: core);
+    if (next.app != _m.app || next.core != _m.core) setState(() => _m = next);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final colors = DashboardColors.of(context);
+    final parts = [
+      (label: context.tr('memory_app'), bytes: _m.app, color: cs.primary),
+      (label: context.tr('memory_core'), bytes: _m.core, color: cs.tertiary),
+    ];
+    final shares = MemorySnapshot.shares([for (final p in parts) p.bytes]);
+    final total = formatBytes(_m.total).split(' ');
     return DashboardCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 8, children: [
-        DashboardCardHeader(glyph: AppGlyphs.dns, title: 'DNS'),
-        const SizedBox(height: 2),
-        row(context.tr('dns_remote_short'), primary),
-        row(context.tr('dns_secondary_short'),
-            session?.secondaryDns.isNotEmpty == true ? session!.secondaryDns : s.secondaryDnsServer),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        DashboardCardHeader(glyph: AppGlyphs.memory, title: context.tr('memory_info')),
+        const SizedBox(height: 6),
+        Text.rich(
+          TextSpan(children: [
+            TextSpan(text: total.first, style: DashboardText.figure(context, AppTextStyle.title2)),
+            if (total.length > 1) TextSpan(text: ' ${total.last}', style: DashboardText.unit(context)),
+          ]),
+          maxLines: 1,
+        ),
+        const Spacer(),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: SizedBox(
+            height: 8,
+            child: _m.total == 0
+                ? ColoredBox(color: colors.tone2)
+                : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    for (final (i, p) in parts.indexed)
+                      if (shares[i] > 0) ...[
+                        if (i > 0 && shares.take(i).any((v) => v > 0)) const SizedBox(width: 2),
+                        Expanded(flex: shares[i], child: ColoredBox(color: p.color)),
+                      ],
+                  ]),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(spacing: 16, runSpacing: 4, children: [
+          for (final p in parts)
+            Row(mainAxisSize: MainAxisSize.min, spacing: 6, children: [
+              DecoratedBox(
+                decoration: BoxDecoration(color: p.color, shape: BoxShape.circle),
+                child: const SizedBox.square(dimension: 8),
+              ),
+              Text(p.label, style: DashboardText.label(context)),
+              Text(p.bytes == 0 ? '-' : formatBytes(p.bytes),
+                  style: AppTextStyle.footnote.of(context, emphasized: true).toTabular),
+            ]),
+        ]),
       ]),
     );
   }

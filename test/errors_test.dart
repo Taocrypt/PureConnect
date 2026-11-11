@@ -36,6 +36,8 @@ void main() {
       'VPN client setup error: failed to connect to aTrust server: dial tcp: lookup a.b: no such host': 'dns',
       'listen tcp 127.0.0.1:1080: bind: address already in use': 'port_in_use',
       'sangfor: SHUTDOWN (cmd 0x08)': 'shutdown',
+      'kicked offline: the account signed in on another device (unexpected recv handshake reply (0x00))': 'kicked',
+      'unexpected recv handshake reply (0x00)': 'tunnel',
     };
     cases.forEach((raw, key) => expect(errorKey(raw), key, reason: raw));
     expect(humanizeErrorIn('zh', cases.keys.elementAt(2)), '用户名或密码错误，请检查配置后重试');

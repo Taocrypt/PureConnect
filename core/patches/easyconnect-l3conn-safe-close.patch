@@ -1,0 +1,252 @@
+diff --git a/client/easyconnect/l3conn.go b/client/easyconnect/l3conn.go
+index 7d1a105..c160846 100644
+--- a/client/easyconnect/l3conn.go
++++ b/client/easyconnect/l3conn.go
+@@ -1,15 +1,27 @@
+ package easyconnect
+ 
+ import (
++	"errors"
+ 	"io"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/mythologyli/zju-connect/log"
+ )
+ 
++// errL3Closed is returned by Read/Write after Close, or after a failed
++// re-handshake left no usable connection.
++var errL3Closed = errors.New("L3 tunnel closed")
++
+ type L3Conn struct {
+ 	easyConnectClient *Client
+ 
++	// connMu guards the sendConn/recvConn fields only (never held during
++	// I/O), so Close can run while a Read or Write is blocked.
++	connMu    sync.Mutex
++	closeOnce sync.Once
++	closed    atomic.Bool
++
+ 	sendConn     io.WriteCloser
+ 	sendLock     sync.Mutex
+ 	sendErrCount int
+@@ -19,23 +31,56 @@ type L3Conn struct {
+ 	recvErrCount int
+ }
+ 
++func (c *L3Conn) recv() io.ReadCloser {
++	c.connMu.Lock()
++	defer c.connMu.Unlock()
++	return c.recvConn
++}
++
++func (c *L3Conn) send() io.WriteCloser {
++	c.connMu.Lock()
++	defer c.connMu.Unlock()
++	return c.sendConn
++}
++
+ // try best to read, if return err!=nil, please panic
+ func (c *L3Conn) Read(p []byte) (n int, err error) {
+ 	c.recvLock.Lock()
+ 	defer c.recvLock.Unlock()
+-	for n, err = c.recvConn.Read(p); err != nil && c.recvErrCount < 5; {
+-
++	conn := c.recv()
++	if conn == nil || c.closed.Load() {
++		return 0, errL3Closed
++	}
++	for n, err = conn.Read(p); err != nil && c.recvErrCount < 5; {
++		if c.closed.Load() {
++			return 0, err
++		}
+ 		log.Printf("Error occurred while receiving, retrying: %v", err)
+ 
+-		// Do handshake again and create a new recvConn
+-		_ = c.recvConn.Close()
+-		c.recvConn, err = c.easyConnectClient.RecvConn()
+-		if err != nil {
+-			return 0, err
++		// Do handshake again and create a new recvConn. Only a successful
++		// handshake replaces the old one: a failed one returns a typed nil
++		// (*tls.UConn), which must never end up in the interface field.
++		_ = conn.Close()
++		next, rerr := c.easyConnectClient.RecvConn()
++		if rerr != nil {
++			c.connMu.Lock()
++			c.recvConn = nil
++			c.connMu.Unlock()
++			return 0, rerr
++		}
++		c.connMu.Lock()
++		if c.closed.Load() {
++			c.connMu.Unlock()
++			_ = next.Close()
++			return 0, errL3Closed
+ 		}
++		c.recvConn = next
++		c.connMu.Unlock()
++		conn = next
++		err = nil
+ 		c.recvErrCount++
+ 		if c.recvErrCount >= 5 {
+-			return 0, err
++			return 0, errors.New("too many receive retries")
+ 		}
+ 	}
+ 	return
+@@ -45,30 +90,59 @@ func (c *L3Conn) Read(p []byte) (n int, err error) {
+ func (c *L3Conn) Write(p []byte) (n int, err error) {
+ 	c.sendLock.Lock()
+ 	defer c.sendLock.Unlock()
+-	for n, err = c.sendConn.Write(p); err != nil && c.sendErrCount < 5; {
++	conn := c.send()
++	if conn == nil || c.closed.Load() {
++		return 0, errL3Closed
++	}
++	for n, err = conn.Write(p); err != nil && c.sendErrCount < 5; {
++		if c.closed.Load() {
++			return 0, err
++		}
+ 		log.Printf("Error occurred while sending, retrying: %v", err)
+ 
+-		// Do handshake again and create a new sendConn
+-		_ = c.sendConn.Close()
+-		c.sendConn, err = c.easyConnectClient.SendConn()
+-		if err != nil {
+-			return 0, err
++		// Do handshake again and create a new sendConn (see Read).
++		_ = conn.Close()
++		next, serr := c.easyConnectClient.SendConn()
++		if serr != nil {
++			c.connMu.Lock()
++			c.sendConn = nil
++			c.connMu.Unlock()
++			return 0, serr
++		}
++		c.connMu.Lock()
++		if c.closed.Load() {
++			c.connMu.Unlock()
++			_ = next.Close()
++			return 0, errL3Closed
+ 		}
++		c.sendConn = next
++		c.connMu.Unlock()
++		conn = next
++		err = nil
+ 		c.sendErrCount++
+ 		if c.sendErrCount >= 5 {
+-			return 0, err
++			return 0, errors.New("too many send retries")
+ 		}
+ 	}
+ 	return
+ }
+ 
++// Close is idempotent and safe while Read/Write are blocked or after a failed
++// re-handshake (nil connections).
+ func (c *L3Conn) Close() error {
+-	if c.sendConn != nil {
+-		_ = c.sendConn.Close()
+-	}
+-	if c.recvConn != nil {
+-		_ = c.recvConn.Close()
+-	}
++	c.closeOnce.Do(func() {
++		c.closed.Store(true)
++		c.connMu.Lock()
++		send, recv := c.sendConn, c.recvConn
++		c.sendConn, c.recvConn = nil, nil
++		c.connMu.Unlock()
++		if send != nil {
++			_ = send.Close()
++		}
++		if recv != nil {
++			_ = recv.Close()
++		}
++	})
+ 	return nil
+ }
+ 
+@@ -79,17 +153,19 @@ func (c *Client) NewL3Conn() (io.ReadWriteCloser, error) {
+ 		recvErrCount:      0,
+ 	}
+ 
+-	var err error
+-	conn.sendConn, err = c.SendConn()
++	sendConn, err := c.SendConn()
+ 	if err != nil {
+ 		log.Printf("Error occurred while creating sendConn: %v", err)
+ 		return nil, err
+ 	}
++	conn.sendConn = sendConn
+ 
+-	conn.recvConn, err = c.RecvConn()
++	recvConn, err := c.RecvConn()
+ 	if err != nil {
+ 		log.Printf("Error occurred while creating recvConn: %v", err)
++		_ = sendConn.Close()
+ 		return nil, err
+ 	}
++	conn.recvConn = recvConn
+ 	return conn, nil
+ }
+diff --git a/client/easyconnect/l3conn_close_test.go b/client/easyconnect/l3conn_close_test.go
+new file mode 100644
+index 0000000..9fdab06
+--- /dev/null
++++ b/client/easyconnect/l3conn_close_test.go
+@@ -0,0 +1,21 @@
++package easyconnect
++
++import "testing"
++
++// A failed re-handshake leaves nil connections; Close must not panic and
++// must be idempotent, and I/O afterwards must fail instead of crashing.
++func TestL3ConnCloseWithNilConns(t *testing.T) {
++	c := &L3Conn{}
++	if err := c.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := c.Read(make([]byte, 10)); err == nil {
++		t.Fatal("read after close succeeded")
++	}
++	if _, err := c.Write([]byte{1}); err == nil {
++		t.Fatal("write after close succeeded")
++	}
++}
+diff --git a/client/easyconnect/protocol.go b/client/easyconnect/protocol.go
+index 0562fc9..7a7f2b5 100644
+--- a/client/easyconnect/protocol.go
++++ b/client/easyconnect/protocol.go
+@@ -22,6 +22,12 @@ var (
+ 	// re-login (new TwfID + new token), or accepting the session is dead.
+ 	ErrSangforShutdown = errors.New("sangfor: SHUTDOWN (cmd 0x08)")
+ 
++	// ErrRecvHandshakeRejected: the server refused to open the receive
++	// stream for our session token. After the stream had been working (a
++	// receive EOF, then this on reconnect) it means the session was taken
++	// over, e.g. the same account signed in on another device.
++	ErrRecvHandshakeRejected = errors.New("unexpected recv handshake reply")
++
+ 	// 0x05/0x06/0x07/0x09 = RECONNECTLATER_* — server is busy or has a
+ 	// session conflict. Caller should sleep and retry, optionally with
+ 	// a fresh re-login. Official client surfaces this to its orchestrator
+@@ -136,8 +142,12 @@ func (c *Client) RecvConn() (*tls.UConn, error) {
+ 	log.DebugPrintf("Recv handshake: read %d bytes", n)
+ 	log.DebugDumpHex(reply[:n])
+ 
+-	if reply[0] != 0x01 {
+-		return nil, errors.New("unexpected recv handshake reply")
++	if n == 0 || reply[0] != 0x01 {
++		code := byte(0)
++		if n > 0 {
++			code = reply[0]
++		}
++		return nil, fmt.Errorf("%w (0x%02x)", ErrRecvHandshakeRejected, code)
+ 	}
+ 
+ 	succeeded = true
