@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import 'desktop_window.dart';
 import 'protocol.dart';
 
 /// Runs zjuconnect-core and turns its output into [CoreEvent]s.
@@ -167,15 +168,7 @@ class DesktopCoreBackend implements CoreBackend {
     }
   }
 
-  static Future<bool> isWindowsAdmin() async {
-    if (!Platform.isWindows) return false;
-    try {
-      final r = await Process.run('net', ['session'], runInShell: true);
-      return r.exitCode == 0;
-    } catch (_) {
-      return false;
-    }
-  }
+  static Future<bool> isWindowsAdmin() => DesktopWindow.isElevated();
 
   /// Desktop TUN needs an administrator password typed into the app only on
   /// Linux without pkexec (sudo -S). Windows uses UAC, macOS the system
@@ -256,21 +249,13 @@ class DesktopCoreBackend implements CoreBackend {
     }
   }
 
-  /// Windows: UAC prompt via PowerShell Start-Process -Verb RunAs.
+  /// Windows: UAC prompt through the runner (ShellExecuteEx "runas", no
+  /// window, no PowerShell).
   static Future<void> _runAsWindows(String bin, String addr, String token) async {
-    String q(String s) => "'${s.replaceAll("'", "''")}'";
-    final script = 'Start-Process -FilePath ${q(bin)} '
-        '-ArgumentList ${q('--dial $addr --token $token')} '
-        '-WorkingDirectory ${q(p.dirname(bin))} -Verb RunAs -WindowStyle Hidden';
-    final r = await Process.run('powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script]);
-    if (r.exitCode != 0) {
-      final err = '${r.stderr}'.trim();
-      if (err.contains('canceled') || err.contains('cancelled') || err.contains('取消') || err.contains('1223')) {
-        throw StateError('Administrator authorization cancelled');
-      }
-      throw StateError('Could not start the core as administrator: $err');
-    }
+    final r = await DesktopWindow.runElevated(bin, '--dial $addr --token $token', p.dirname(bin));
+    if (r == null) throw StateError('Could not start the core as administrator');
+    if (r.cancelled) throw StateError('Administrator authorization cancelled');
+    if (!r.ok) throw StateError('Could not start the core as administrator (error ${r.error})');
   }
 
   /// macOS: the system administrator prompt via AppleScript. The core runs

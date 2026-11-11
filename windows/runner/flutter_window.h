@@ -49,6 +49,8 @@ class FlutterWindow : public Win32Window {
   bool SetIconFromFile(const std::string& path);
   bool SetIconFromResource(int index);
   bool ApplyIcons(HICON big_icon, HICON small_icon);
+  bool ShowNotification(const std::wstring& title, const std::wstring& body);
+  void RemoveNotifyIcon();
   void ShowAndFocus();
   void Notify(const std::string& method);
 
@@ -62,6 +64,7 @@ class FlutterWindow : public Win32Window {
   // WinINet system proxy (see flutter_window.cpp).
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
   HICON big_icon_ = nullptr;
+  bool notify_icon_added_ = false;
   HICON small_icon_ = nullptr;
 
   bool start_hidden_ = false;

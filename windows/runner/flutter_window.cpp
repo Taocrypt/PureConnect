@@ -3,6 +3,8 @@
 #include <wininet.h>
 #include <knownfolders.h>
 #include <shlobj.h>
+#include <shellapi.h>
+#include <strsafe.h>
 #include <shobjidl.h>
 
 #include <cwchar>
@@ -265,6 +267,90 @@ EncodableMap UpdateShortcutIcons(int index) {
                       {EncodableValue("found"), EncodableValue(found)}};
 }
 
+
+// --- in-process replacements for helper processes (no PowerShell, reg.exe
+// or cmd.exe children; security software flags hidden PowerShell) ---------
+
+constexpr UINT kTrayIconId = 1;          // the tray plugin's icon
+constexpr UINT kNotifyIconId = 0x504e;   // temporary icon for a notification
+constexpr UINT_PTR kNotifyTimerId = 0x504e;
+constexpr wchar_t kRunKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+std::string StringArg(const EncodableMap& map, const char* key) {
+  const auto it = map.find(EncodableValue(key));
+  if (it == map.end()) return std::string();
+  const auto* s = std::get_if<std::string>(&it->second);
+  return s ? *s : std::string();
+}
+
+// Whether this process runs elevated (replaces `net session`).
+bool IsProcessElevated() {
+  HANDLE token = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+  TOKEN_ELEVATION elevation{};
+  DWORD size = 0;
+  const bool ok = GetTokenInformation(token, TokenElevation, &elevation,
+                                      sizeof(elevation), &size) != FALSE;
+  CloseHandle(token);
+  return ok && elevation.TokenIsElevated != 0;
+}
+
+// Starts [file] elevated (UAC prompt) without a window (replaces PowerShell
+// Start-Process -Verb RunAs). Returns {ok, cancelled, error}.
+EncodableMap RunElevated(HWND owner, const EncodableMap& args) {
+  const std::wstring file = Utf8ToWide(StringArg(args, "file"));
+  const std::wstring params = Utf8ToWide(StringArg(args, "args"));
+  const std::wstring dir = Utf8ToWide(StringArg(args, "dir"));
+  SHELLEXECUTEINFOW info{};
+  info.cbSize = sizeof(info);
+  info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+  info.hwnd = owner;
+  info.lpVerb = L"runas";
+  info.lpFile = file.c_str();
+  info.lpParameters = params.empty() ? nullptr : params.c_str();
+  info.lpDirectory = dir.empty() ? nullptr : dir.c_str();
+  info.nShow = SW_HIDE;  // the core is a console program
+  const bool ok = ShellExecuteExW(&info) != FALSE;
+  const DWORD error = ok ? 0 : GetLastError();
+  return EncodableMap{
+      {EncodableValue("ok"), EncodableValue(ok)},
+      {EncodableValue("cancelled"), EncodableValue(error == ERROR_CANCELLED)},
+      {EncodableValue("error"), EncodableValue(static_cast<int>(error))}};
+}
+
+// HKCU Run entry (replaces reg.exe). Null when absent.
+EncodableValue AutostartGet(const std::wstring& name) {
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+    return EncodableValue();
+  }
+  std::wstring value;
+  const bool found = ReadRegString(key, name.c_str(), &value);
+  RegCloseKey(key);
+  return found ? EncodableValue(WideToUtf8(value)) : EncodableValue();
+}
+
+// Sets ([value] non-empty) or removes the HKCU Run entry.
+bool AutostartSet(const std::wstring& name, const std::wstring& value) {
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, kRunKey, 0, nullptr, 0,
+                      KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+    return false;
+  }
+  LSTATUS r;
+  if (value.empty()) {
+    r = RegDeleteValueW(key, name.c_str());
+    if (r == ERROR_FILE_NOT_FOUND) r = ERROR_SUCCESS;
+  } else {
+    r = RegSetValueExW(key, name.c_str(), 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(value.c_str()),
+                       static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+  }
+  RegCloseKey(key);
+  return r == ERROR_SUCCESS;
+}
+
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
@@ -337,6 +423,28 @@ void FlutterWindow::HandleWindowCall(
       ok = SetIconFromFile(*path);
     }
     result->Success(EncodableValue(ok));
+  } else if (method == "notify") {
+    const auto* map = args ? std::get_if<EncodableMap>(args) : nullptr;
+    result->Success(EncodableValue(
+        map != nullptr && ShowNotification(Utf8ToWide(StringArg(*map, "title")),
+                                           Utf8ToWide(StringArg(*map, "body")))));
+  } else if (method == "isElevated") {
+    result->Success(EncodableValue(IsProcessElevated()));
+  } else if (method == "runElevated") {
+    const auto* map = args ? std::get_if<EncodableMap>(args) : nullptr;
+    if (map == nullptr) {
+      result->Success(EncodableValue());
+    } else {
+      result->Success(EncodableValue(RunElevated(GetHandle(), *map)));
+    }
+  } else if (method == "autostartGet") {
+    const auto* name = args ? std::get_if<std::string>(args) : nullptr;
+    result->Success(name ? AutostartGet(Utf8ToWide(*name)) : EncodableValue());
+  } else if (method == "autostartSet") {
+    const auto* map = args ? std::get_if<EncodableMap>(args) : nullptr;
+    result->Success(EncodableValue(
+        map != nullptr && AutostartSet(Utf8ToWide(StringArg(*map, "name")),
+                                       Utf8ToWide(StringArg(*map, "value")))));
   } else if (method == "setShortcutIcon") {
     const auto* index = args ? std::get_if<int>(args) : nullptr;
     if (index == nullptr || *index < 0 || *index >= kAppIconCount) {
@@ -377,6 +485,56 @@ void FlutterWindow::HandleWindowCall(
   } else {
     result->NotImplemented();
   }
+}
+
+// A notification as a tray balloon (Windows 10/11 show it as a toast under
+// PureConnect's name and icon). Uses the tray icon when it is there, else a
+// temporary icon removed again after a while.
+bool FlutterWindow::ShowNotification(const std::wstring& title,
+                                     const std::wstring& body) {
+  HWND hwnd = GetHandle();
+  if (hwnd == nullptr) return false;
+  NOTIFYICONDATAW data{};
+  data.cbSize = sizeof(data);
+  data.hWnd = hwnd;
+  data.uID = kTrayIconId;
+  data.uFlags = NIF_INFO;
+  data.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
+  HICON large = static_cast<HICON>(LoadImageW(
+      GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED));
+  data.hBalloonIcon = large;
+  StringCchCopyW(data.szInfoTitle, ARRAYSIZE(data.szInfoTitle), title.c_str());
+  StringCchCopyW(data.szInfo, ARRAYSIZE(data.szInfo),
+                 body.empty() ? L" " : body.c_str());
+  if (Shell_NotifyIconW(NIM_MODIFY, &data)) return true;
+
+  // No tray icon (hidden or not created): a temporary one.
+  data.uID = kNotifyIconId;
+  data.uFlags = NIF_INFO | NIF_ICON | NIF_TIP;
+  data.hIcon = static_cast<HICON>(LoadImageW(
+      GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
+  StringCchCopyW(data.szTip, ARRAYSIZE(data.szTip), L"PureConnect");
+  if (!notify_icon_added_) {
+    if (!Shell_NotifyIconW(NIM_ADD, &data)) return false;
+    notify_icon_added_ = true;
+  } else if (!Shell_NotifyIconW(NIM_MODIFY, &data)) {
+    return false;
+  }
+  SetTimer(hwnd, kNotifyTimerId, 15000, nullptr);
+  return true;
+}
+
+void FlutterWindow::RemoveNotifyIcon() {
+  KillTimer(GetHandle(), kNotifyTimerId);
+  if (!notify_icon_added_) return;
+  NOTIFYICONDATAW data{};
+  data.cbSize = sizeof(data);
+  data.hWnd = GetHandle();
+  data.uID = kNotifyIconId;
+  Shell_NotifyIconW(NIM_DELETE, &data);
+  notify_icon_added_ = false;
 }
 
 bool FlutterWindow::SetIconFromResource(int index) {
@@ -468,7 +626,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
   if (message == kQuitMessage) {
+    RemoveNotifyIcon();
     DestroyWindow(hwnd);
+    return 0;
+  }
+  if (message == WM_TIMER && wparam == kNotifyTimerId) {
+    RemoveNotifyIcon();
     return 0;
   }
   if (activate_message_ != 0 && message == activate_message_) {

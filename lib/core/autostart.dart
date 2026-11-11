@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'desktop_window.dart';
+
 /// Launch at login on desktop. The OS entry itself is the source of truth
 /// (it is per machine, so it is not part of settings or backups).
 ///
@@ -13,7 +15,6 @@ import 'package:path/path.dart' as p;
 /// tray until opened.
 class Autostart {
   static const _id = 'com.taocrypt.pureconnect';
-  static const _runKey = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
   static const _runValue = 'PureConnect';
 
   static bool get supported => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -32,8 +33,7 @@ class Autostart {
   static Future<bool> isEnabled() async {
     try {
       if (Platform.isWindows) {
-        final r = await Process.run('reg', ['query', _runKey, '/v', _runValue]);
-        return r.exitCode == 0;
+        return await DesktopWindow.autostartGet(_runValue) != null;
       }
       if (Platform.isMacOS) return _macPlist?.existsSync() ?? false;
       if (Platform.isLinux) return _linuxDesktop?.existsSync() ?? false;
@@ -45,13 +45,10 @@ class Autostart {
   static Future<bool> set(bool enabled, {bool hidden = false}) async {
     try {
       if (Platform.isWindows) {
-        if (!enabled) {
-          final r = await Process.run('reg', ['delete', _runKey, '/v', _runValue, '/f']);
-          return r.exitCode == 0 || !await isEnabled();
-        }
+        // In-process registry access through the runner (no reg.exe).
+        if (!enabled) return await DesktopWindow.autostartSet(_runValue, '') || !await isEnabled();
         final cmd = '"${Platform.resolvedExecutable}"${hidden ? ' --hidden' : ''}';
-        final r = await Process.run('reg', ['add', _runKey, '/v', _runValue, '/t', 'REG_SZ', '/d', cmd, '/f']);
-        return r.exitCode == 0;
+        return await DesktopWindow.autostartSet(_runValue, cmd);
       }
       if (Platform.isMacOS) {
         final f = _macPlist;

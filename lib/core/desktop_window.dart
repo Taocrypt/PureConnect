@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 /// macos/Runner/MainFlutterWindow.swift, linux/runner/my_application.cc).
 ///
 /// Dart → native: setIcon, show, hide, isVisible, setPreventClose, quit;
-/// macOS setDockIconVisible / launchArgs; Windows proxyGet / proxySet / proxyGuard.
+/// macOS setDockIconVisible / launchArgs; Windows proxyGet / proxySet /
+/// proxyGuard, notify, isElevated, runElevated, autostartGet / autostartSet,
+/// setShortcutIcon (all in-process, no helper processes).
 /// Native → Dart: close (window close button while preventClose is on),
 /// minimized (window minimised),
 /// quitRequested (macOS Cmd+Q / logout), activate (second launch, Dock click).
@@ -55,6 +57,40 @@ class DesktopWindow {
   static Future<bool> proxySet(Map<String, dynamic> settings) async {
     if (!Platform.isWindows) return false;
     return await _call<bool>('proxySet', settings) ?? false;
+  }
+
+  /// Windows: a notification shown in-process by the runner (tray balloon,
+  /// a toast on Windows 10/11). No helper process.
+  static Future<bool> notify(String title, String body) async {
+    if (!Platform.isWindows) return false;
+    return await _call<bool>('notify', {'title': title, 'body': body}) ?? false;
+  }
+
+  /// Windows: whether the app itself runs elevated.
+  static Future<bool> isElevated() async {
+    if (!Platform.isWindows) return false;
+    return await _call<bool>('isElevated') ?? false;
+  }
+
+  /// Windows: starts [file] elevated through the UAC prompt (ShellExecuteEx
+  /// "runas", no window). Null when the runner could not be asked.
+  static Future<({bool ok, bool cancelled, int error})?> runElevated(String file, String args, String dir) async {
+    if (!Platform.isWindows) return null;
+    final m = await _call<Map<Object?, Object?>>('runElevated', {'file': file, 'args': args, 'dir': dir});
+    if (m == null) return null;
+    return (ok: m['ok'] == true, cancelled: m['cancelled'] == true, error: (m['error'] as num?)?.toInt() ?? 0);
+  }
+
+  /// Windows: the HKCU Run value [name] (null: absent).
+  static Future<String?> autostartGet(String name) async {
+    if (!Platform.isWindows) return null;
+    return _call<String>('autostartGet', name);
+  }
+
+  /// Windows: sets the HKCU Run value [name]; an empty [value] removes it.
+  static Future<bool> autostartSet(String name, String value) async {
+    if (!Platform.isWindows) return false;
+    return await _call<bool>('autostartSet', {'name': name, 'value': value}) ?? false;
   }
 
   /// Windows: settings the runner restores by itself at logoff/shutdown
