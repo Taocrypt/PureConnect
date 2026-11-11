@@ -20,15 +20,14 @@ import '../../models/settings.dart';
 import '../../state/providers.dart';
 import '../../core/apps.dart';
 import '../widgets/app_list.dart';
-import '../widgets/update_dialog.dart';
 import '../kit/app_glyphs.dart';
 import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
+import 'about_page.dart';
 import 'backup_page.dart';
 import 'list_editors.dart';
 import 'logs_page.dart';
 import 'theme_page.dart';
-import 'update_mirrors_page.dart';
 
 /// "Tools" in FlClash's navigation, in sections: 连接 (proxy, DNS, advanced),
 /// 规则与转发 (domain / DNS / port lists), 应用 (theme, language, start-up,
@@ -132,7 +131,7 @@ class SettingsPage extends ConsumerWidget {
         ]),
         _AppSettings(mobile: mobile),
         if (DesktopWindow.isDesktop) const _DesktopSettings(),
-        const _About(),
+        const _AboutEntry(),
       ]),
     );
   }
@@ -216,13 +215,13 @@ class _AdvancedSettings extends ConsumerWidget {
     final s = ref.watch(settingsProvider);
     final n = ref.read(settingsProvider.notifier);
     return PageList(children: [
-      SettingsGroup(children: [
+      SettingsGroup(title: context.tr('route_keepalive'), children: [
         SwitchTile(title: context.tr('add_route'), subtitle: context.tr('add_route_desc'), value: s.addRoute, onChanged: (v) => n.update((x) => x.addRoute = v)),
         SwitchTile(title: context.tr('keep_alive'), subtitle: context.tr('keep_alive_desc'), value: !s.disableKeepAlive, onChanged: (v) => n.update((x) => x.disableKeepAlive = !v)),
         TextTile(title: context.tr('keep_alive_url'), value: s.keepAliveUrl, hint: 'https://<内网地址>/favicon.ico', onChanged: (v) => n.update((x) => x.keepAliveUrl = v)),
       ]),
       if (!Platform.isAndroid)
-        SettingsGroup(children: [
+        SettingsGroup(title: context.tr('outbound_interface'), footer: context.tr('outbound_interface_hint'), children: [
           TextTile(title: context.tr('bind_interface'), value: s.bindInterface, hint: 'eth0 / Wi-Fi', onChanged: (v) => n.update((x) => x.bindInterface = v)),
           SwitchTile(title: context.tr('auto_detect_interface'), value: s.autoDetectInterface, onChanged: (v) => n.update((x) => x.autoDetectInterface = v)),
         ]),
@@ -612,18 +611,16 @@ class _AppSettings extends ConsumerWidget {
   }
 }
 
-/// About: version, update check and project link up top; the version /
-/// component details fold into one expandable row.
-class _About extends ConsumerStatefulWidget {
-  const _About();
+/// One 关于 entry opening the About page (FlClash style secondary page).
+class _AboutEntry extends StatefulWidget {
+  const _AboutEntry();
 
   @override
-  ConsumerState<_About> createState() => _AboutState();
+  State<_AboutEntry> createState() => _AboutEntryState();
 }
 
-class _AboutState extends ConsumerState<_About> {
+class _AboutEntryState extends State<_AboutEntry> {
   String _appVersion = '';
-  bool _details = false;
 
   @override
   void initState() {
@@ -634,107 +631,16 @@ class _AboutState extends ConsumerState<_About> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final core = ref.watch(coreProvider.select((s) => s.version));
-    final s = ref.watch(settingsProvider);
-    final n = ref.read(settingsProvider.notifier);
-    final label = DashboardText.label(context);
-    return SettingsGroup(title: context.tr('about'), children: [
-      SettingsTile(
-        glyph: AppGlyphs.sync,
-        title: context.tr('check_update'),
-        subtitle: context.tr('check_update_desc'),
-        trailing: Text(_appVersion.isEmpty ? '' : 'v$_appVersion', style: label),
-        chevron: true,
-        onTap: () => checkForUpdate(context, ref, manual: true),
-      ),
-      SwitchTile(
-        glyph: AppGlyphs.clock,
-        title: context.tr('auto_check_update'),
-        subtitle: context.tr('auto_check_update_desc'),
-        value: s.autoCheckUpdate,
-        onChanged: (v) => n.update((x) => x.autoCheckUpdate = v),
-      ),
-      SettingsTile(
-        glyph: AppGlyphs.cloudDownload,
-        title: context.tr('update_mirrors'),
-        subtitle: s.updateMirrors.isNotEmpty
-            ? context.tr('update_mirrors_desc_custom', {'n': '${s.updateMirrors.length}'})
-            : context.tr(MirrorMode.parse(s.updateMirrorMode) == MirrorMode.direct ? 'update_mirrors_desc_direct' : 'update_mirrors_desc_auto'),
-        chevron: true,
-        onTap: () => pushPage(context, (_) => AppPage(canPop: true, title: context.tr('update_mirrors'), body: const UpdateMirrorsPage())),
-      ),
-      SettingsTile(
-        glyph: AppGlyphs.code,
-        title: context.tr('project_home'),
-        subtitle: 'github.com/Taocrypt/PureConnect',
-        trailing: GlyphIcon(AppGlyphs.openExternal, size: 18, color: context.colorScheme.onSurfaceVariant),
-        onTap: () => launchUrl(Uri.parse(repoUrl), mode: LaunchMode.externalApplication),
-      ),
-      SettingsTile(
-        glyph: AppGlyphs.info,
-        title: context.tr('version_details'),
-        subtitle: context.tr('version_details_desc'),
-        trailing: AnimatedRotation(
-          turns: _details ? 0.5 : 0,
-          duration: const Duration(milliseconds: 200),
-          child: GlyphIcon(AppGlyphs.chevronDown, size: 18, color: context.colorScheme.onSurfaceVariant),
+  Widget build(BuildContext context) => SettingsGroup(children: [
+        SettingsTile(
+          glyph: AppGlyphs.info,
+          title: context.tr('about'),
+          subtitle: context.tr('about_entry_desc'),
+          trailing: Text(_appVersion.isEmpty ? '' : 'v$_appVersion', style: DashboardText.label(context)),
+          chevron: true,
+          onTap: () => pushPage(context, (_) => const AboutPage()),
         ),
-        onTap: () => setState(() => _details = !_details),
-      ),
-      AnimatedSize(
-        duration: const Duration(milliseconds: 200),
-        alignment: Alignment.topCenter,
-        child: !_details
-            ? const SizedBox(width: double.infinity)
-            : Column(children: [
-                _DetailRow(title: context.tr('app_version'), value: _appVersion.isEmpty ? '-' : _appVersion),
-                _DetailRow(title: context.tr('core_version'), value: core.isEmpty ? context.tr('core_version_unknown') : core),
-                _DetailRow(
-                  title: context.tr('upstream_core'),
-                  value: 'Mythologyli/zju-connect',
-                  url: 'https://github.com/Mythologyli/zju-connect',
-                ),
-                _DetailRow(
-                  title: context.tr('ui_design'),
-                  value: 'FlClash / prism_ui',
-                  url: 'https://github.com/chen08209/FlClash',
-                ),
-              ]),
-      ),
-    ]);
-  }
-}
-
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.title, required this.value, this.url});
-  final String title;
-  final String value;
-  final String? url;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.colorScheme;
-    final row = Padding(
-      padding: const EdgeInsets.fromLTRB(58, 10, 20, 10),
-      child: Row(spacing: 12, children: [
-        Text(title, style: AppTextStyle.subheadline.of(context)),
-        Expanded(
-          child: Text(value,
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
-              style: DashboardText.label(context, color: url == null ? null : cs.primary)),
-        ),
-        if (url != null) GlyphIcon(AppGlyphs.openExternal, size: 16, color: cs.onSurfaceVariant),
-      ]),
-    );
-    if (url == null) return row;
-    return PressRegion(
-      onTap: () => launchUrl(Uri.parse(url!), mode: LaunchMode.externalApplication),
-      overlay: PressRegion.hoverOverlay,
-      child: row,
-    );
-  }
+      ]);
 }
 
 /// Add / change the external proxy: it is saved only when it answers as the

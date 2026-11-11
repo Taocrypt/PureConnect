@@ -61,7 +61,7 @@ class _ResourcesPageState extends ConsumerState<ResourcesPage> {
         .toList();
     final probes = ref.watch(probeProvider);
     final probeTargets = {for (final r in rows) if (r.$3 != null) r.$3!.key: r.$3!}.values.toList();
-    final bottom = (mobile ? NavigationDock.heightOf(context) + 24 : 24) + MediaQuery.paddingOf(context).bottom;
+    final bottom = (mobile ? dockInset(context) + 24 : 24) + MediaQuery.paddingOf(context).bottom;
     final side = mobile ? 16.0 : 24.0;
 
     return AppPage(

@@ -44,6 +44,7 @@ class DesktopShell {
     _ref = ref;
     DesktopWindow.channel.setMethodCallHandler(_onNative);
     await DesktopWindow.setPreventClose(true);
+    DesktopWindow.maximized.value = await DesktopWindow.isMaximized();
     if (Platform.isMacOS && ref.read(settingsProvider).hideDockIcon) {
       await DesktopWindow.setDockIconVisible(false);
     }
@@ -70,12 +71,11 @@ class DesktopShell {
   Future<dynamic> _onNative(MethodCall call) async {
     switch (call.method) {
       case 'close':
-        final ref = _ref;
-        if (ref != null && ref.read(settingsProvider).closeToTray && _trayShown) {
-          await _hideToTray();
-        } else {
-          await quit();
-        }
+        await requestClose();
+      case 'maximized':
+        DesktopWindow.maximized.value = true;
+      case 'unmaximized':
+        DesktopWindow.maximized.value = false;
       case 'minimized':
         final ref = _ref;
         if (ref != null && ref.read(settingsProvider).minimizeToTray && _trayShown) {
@@ -87,6 +87,17 @@ class DesktopShell {
         break;
     }
     return null;
+  }
+
+  /// The window's close button (the system one, or the app's own caption):
+  /// hides to the tray when that is on and a tray exists, else quits.
+  Future<void> requestClose() async {
+    final ref = _ref;
+    if (ref != null && ref.read(settingsProvider).closeToTray && _trayShown) {
+      await _hideToTray();
+    } else {
+      await quit();
+    }
   }
 
   /// Hides the window; the first time in a run, says where it went.

@@ -23,13 +23,15 @@
 | 按服务端资源加路由、保活 URL、绑定网卡/自动检测、调试日志、aTrust 刷新间隔 | 工具 → 连接 → 高级 |
 | 虚拟 IP、路由、IP/域名资源浏览 | 仪表盘 / 资源 |
 | 实时日志（过滤、搜索、复制） | 日志 |
-| 主题模式、主题色、动态取色、应用图标 | 工具 → 应用 → 主题 |
+| 主题（FlClash 同款）：主题模式、纯黑、主题色（跟随系统 / 预设 / 自定义取色）与配色风格、底栏样式、选项卡动画、液态玻璃、侧边栏背景模糊（Windows / macOS）、字体、文本缩放；应用图标 | 工具 → 应用 → 主题 |
 | 自动重连（可设间隔）、掉线 / 重连系统通知 | 工具 → 连接 / 应用 |
 | 连接时询问未保存的账号密码或手机号；首次启动配置引导 | 弹窗 / 配置 → 添加 |
 | 额外内核参数（zju-connect 命令行格式）、PCAP / TLS 密钥导出与调试文件 | 工具 → 连接 → 高级 |
 | 最小化到托盘、系统代理排除、覆盖提示、清除系统代理、`--connect` 启动参数 | 工具 → 桌面 |
 | 日志导出、aTrust 清除登录缓存、恢复默认设置 | 日志 / 配置 → 编辑 / 备份与恢复 |
 | 检查更新（GitHub Release；Android 按架构下载 APK 并安装，桌面下载安装包），启动时自动检查；直连 GitHub 不通时自动测速选用镜像，可自定义镜像或始终直连 | 工具 → 关于 |
+| 沉浸式窗口（FlClash 同款）：隐藏系统标题栏，自绘标题栏（置顶 / 最小化 / 最大化 / 关闭、拖动、双击最大化），Windows 11 圆角；macOS 透明全尺寸标题栏 | 桌面窗口 |
+| 首次启动免责声明（需输入确认语句或一键填入后同意）、开源许可、QQ 用户反馈群 | 启动 / 工具 → 关于 |
 
 ## 架构
 
@@ -42,7 +44,7 @@ Flutter UI ──JSON lines(stdin/stdout)──▶ zjuconnect-core (Go)
   二次认证全部变成 JSON 事件（协议见 `core/bridge/protocol.go`，Dart 侧 `lib/core/protocol.dart`）。
   构建时被复制进上游源码树 `cmd/zjuconnect-core`，以便复用 `internal/` 包，无需 fork 上游。
 * 内核以**独立进程**运行：上游的代理监听器无法在进程内停止，独立进程保证每次断开都能干净释放。
-* 桌面：Dart 直接拉起 `zjuconnect-core`。TUN 模式需要管理员权限：Windows 用 UAC（`Start-Process -Verb RunAs`）、
+* 桌面：Dart 直接拉起 `zjuconnect-core`。TUN 模式需要管理员权限：Windows 用 UAC（`ShellExecuteEx` runas，无辅助进程）、
   macOS 用系统授权框（`osascript … with administrator privileges`）以管理员身份启动内核，内核带
   `--dial 127.0.0.1:<port> --token <t>` 通过本机 TCP 连回界面（协议与 stdin/stdout 相同，连接断开内核即退出）；
   应用本身已是管理员时直接用管道。Linux 用 `pkexec`（保留管道），没有 pkexec 时退回 `sudo -S`（应用内输入密码）。
@@ -89,6 +91,27 @@ flutter build macos --release    # macOS（内核放在 .app/Contents/Resources/
 * Android 签名使用仓库 secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。
 * Linux 本地构建需要 `libgtk-3-dev libx11-dev libayatana-appindicator3-dev`。
 
-## 许可
+## 用户反馈
 
-内核 zju-connect 为 AGPL-3.0；本项目的界面参考 FlClash（GPL-3.0）的设计但为独立实现。
+QQ 用户反馈群「PureConnect用户反馈群」：<https://qm.qq.com/q/tLAgIcTjFY>（应用内：工具 → 关于 → QQ 用户反馈群）。
+
+## 许可证
+
+PureConnect 以 **GNU Affero General Public License v3.0** 发布（SPDX：`AGPL-3.0-only`），完整文本见 [`LICENSE`](LICENSE)。
+
+* 内核 [zju-connect](https://github.com/Mythologyli/zju-connect) 为 AGPL-3.0。
+* 界面派生自 [FlClash](https://github.com/chen08209/FlClash)（GPL-3.0），内置的
+  [prism_ui](https://github.com/chen08209/prism_ui)（GPL-3.0）保留其 `LICENSE`；部分功能参考了
+  [EZ4Connect](https://github.com/chenx-dust/EZ4Connect)（GPL-3.0）与
+  [hitsz-connect-verge](https://github.com/kowyo/hitsz-connect-verge)（GPL-3.0）。
+* 第三方组件清单见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)；Flutter / Dart 依赖的许可可在应用内
+  「关于 → 开源许可」查看。
+
+## 免责声明与商标
+
+PureConnect 是基于 zju-connect 内核的**非官方**开源第三方客户端，与深信服科技股份有限公司（Sangfor Technologies Inc.）
+及任何学校、机构均无关联，未获得其授权、认可或支持。「EasyConnect」「aTrust」及相关商标和著作权归深信服科技股份有限公司所有。
+
+本软件仅供学习研究和个人使用，用于连接你已获授权访问的网络；请遵守所在学校或单位的网络使用规定及适用的法律法规。
+本软件按“现状”提供，不附带任何担保，使用风险由用户自行承担。应用不收集、不上传账号、密码或流量，数据仅保存在本地
+（用户自行配置的 WebDAV 备份除外）。首次启动时应用会显示完整的免责声明，之后可在「关于 → 免责声明」中查看。

@@ -63,7 +63,7 @@ class DashboardPage extends ConsumerWidget {
       body: LayoutBuilder(builder: (context, c) {
         final mobile = isMobileLayout(context);
         final hPad = mobile ? math.max(16.0, (c.maxWidth - 560) / 2) : 24.0;
-        final bottom = (mobile ? NavigationDock.heightOf(context) + 28 : 24) + MediaQuery.paddingOf(context).bottom;
+        final bottom = (mobile ? dockInset(context) + 28 : 24) + MediaQuery.paddingOf(context).bottom;
         const gap = 16.0;
         if (mobile) {
           return ListView(

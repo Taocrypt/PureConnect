@@ -70,7 +70,7 @@ class AppPage extends StatelessWidget {
           if (floating != null)
             PositionedDirectional(
               end: mobile ? 20 : 28,
-              bottom: (mobile ? NavigationDock.heightOf(context) + 28 : 28) +
+              bottom: (mobile ? dockInset(context) + 28 : 28) +
                   MediaQuery.paddingOf(context).bottom,
               child: floating!,
             ),
@@ -113,7 +113,7 @@ class PageList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mobile = isMobileLayout(context);
-    final bottom = (mobile ? NavigationDock.heightOf(context) + 24 : 24) + MediaQuery.paddingOf(context).bottom;
+    final bottom = (mobile ? dockInset(context) + 24 : 24) + MediaQuery.paddingOf(context).bottom;
     return ListView(
       padding: EdgeInsets.fromLTRB(mobile ? 16 : 24, 4, mobile ? 16 : 24, bottom),
       children: [

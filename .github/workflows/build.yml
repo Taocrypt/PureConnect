@@ -214,6 +214,7 @@ jobs:
           VER=${{ steps.ver.outputs.version }}
           B=build/linux/x64/release/bundle
           test -x "$B/pureconnect" && test -x "$B/lib/zjuconnect-core"
+          cp LICENSE THIRD_PARTY_NOTICES.md "$B/"
           mkdir -p dist
           tar -C build/linux/x64/release -czf dist/PureConnect-$VER-linux-x64.tar.gz --transform 's,^bundle,PureConnect,' bundle
           D=$(mktemp -d)
@@ -222,6 +223,20 @@ jobs:
           ln -s /opt/pureconnect/pureconnect $D/usr/bin/pureconnect
           cp linux/packaging/com.taocrypt.pureconnect.desktop $D/usr/share/applications/
           cp assets/icon/a1.png $D/usr/share/icons/hicolor/512x512/apps/com.taocrypt.pureconnect.png
+          # Machine-readable copyright (DEP-5): PureConnect is AGPL-3.0-only.
+          mkdir -p $D/usr/share/doc/pureconnect
+          cp THIRD_PARTY_NOTICES.md $D/usr/share/doc/pureconnect/
+          {
+            echo "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/"
+            echo "Upstream-Name: PureConnect"
+            echo "Source: https://github.com/Taocrypt/PureConnect"
+            echo ""
+            echo "Files: *"
+            echo "Copyright: PureConnect contributors"
+            echo "License: AGPL-3.0-only"
+            echo " The full text of the GNU AGPL-3.0 is in /opt/pureconnect/LICENSE."
+            echo " Third-party notices: /usr/share/doc/pureconnect/THIRD_PARTY_NOTICES.md"
+          } > $D/usr/share/doc/pureconnect/copyright
           {
             echo "Package: pureconnect"
             echo "Version: $VER"

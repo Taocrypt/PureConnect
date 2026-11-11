@@ -535,3 +535,21 @@ class DashboardIconButton extends StatelessWidget {
         ),
       );
 }
+
+/// Whether the phone layout's navigation is the floating dock (pages leave
+/// room under their content for it) or a docked bar that takes its own space.
+class DockScope extends InheritedWidget {
+  const DockScope({super.key, required this.floating, required super.child});
+
+  final bool floating;
+
+  static bool floatingOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<DockScope>()?.floating ?? true;
+
+  @override
+  bool updateShouldNotify(DockScope oldWidget) => floating != oldWidget.floating;
+}
+
+/// Room a page leaves at its bottom for the floating dock.
+double dockInset(BuildContext context) =>
+    DockScope.floatingOf(context) ? NavigationDock.heightOf(context) : 0;

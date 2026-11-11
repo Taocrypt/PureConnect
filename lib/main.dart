@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,6 +41,7 @@ Future<void> main(List<String> args) async {
       }
     } catch (_) {}
   }
+  _registerLicenses();
   runApp(ProviderScope(
     overrides: [
       prefsProvider.overrideWithValue(prefs),
@@ -48,6 +50,33 @@ Future<void> main(List<String> args) async {
     child: const ZjuConnectApp(),
   ));
 }
+
+/// PureConnect's own licence (GNU AGPL-3.0, the LICENSE file, which covers
+/// the bundled zju-connect core too) and the projects it derives from, shown
+/// on the licence page next to every package's licence.
+void _registerLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+      const ['PureConnect', 'zju-connect'],
+      await rootBundle.loadString('LICENSE'),
+    );
+    yield const LicenseEntryWithLineBreaks(['FlClash'], _flclashNotice);
+    yield const LicenseEntryWithLineBreaks(['EZ4Connect', 'hitsz-connect-verge'], _ideasNotice);
+  });
+}
+
+const _flclashNotice = '''PureConnect's user interface is derived from FlClash
+(https://github.com/chen08209/FlClash), Copyright (C) chen08209 and the
+FlClash contributors, licensed under the GNU General Public License v3.0.
+Parts of its theme page, colour picker, font list, window frame, about page
+and disclaimer were ported and adapted. The design system prism_ui
+(GPL-3.0) is vendored in third_party/prism_ui with its LICENSE; the full
+GPL-3.0 text is listed under prism_ui.''';
+
+const _ideasNotice = '''Some features follow ideas from EZ4Connect
+(https://github.com/chenx-dust/EZ4Connect) and hitsz-connect-verge
+(https://github.com/kowyo/hitsz-connect-verge), both licensed under the GNU
+General Public License v3.0.''';
 
 /// Release builds render a widget exception as a plain grey box, which looks
 /// like a stuck full-screen overlay. Show the error instead and keep a log

@@ -19,6 +19,7 @@ import 'kit/common.dart';
 import 'kit/dashboard_kit.dart';
 import 'widgets/update_dialog.dart';
 import 'pages/dashboard_page.dart';
+import 'pages/disclaimer_page.dart';
 import 'pages/logs_page.dart';
 import 'pages/profiles_page.dart';
 import 'pages/resources_page.dart';
@@ -26,6 +27,7 @@ import 'pages/settings_page.dart';
 import 'widgets/challenge_dialogs.dart';
 import 'widgets/connect_prompts.dart';
 import 'tour/guide_tour.dart';
+import 'window_frame.dart';
 
 enum AppTab { dashboard, profiles, resources, logs, tools }
 
@@ -81,9 +83,22 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// then connecting when "connect on launch" is on or the app was started
   /// with `--connect`.
   Future<void> _startup() async {
-    final settings = ref.read(settingsProvider);
     final args = await DesktopWindow.launchArgs();
     if (!mounted) return;
+    // The disclaimer comes first, once per disclaimer version (also for
+    // users updating from a version without it). Declining leaves the app.
+    if (needsDisclaimer(ref.read(settingsProvider).disclaimerAccepted)) {
+      if (DesktopWindow.isDesktop) await DesktopWindow.show();
+      if (!mounted) return;
+      final agreed = await requestDisclaimerConsent(context);
+      if (!agreed) {
+        await exitAfterDecline();
+        return;
+      }
+      ref.read(settingsProvider.notifier).update((s) => s.disclaimerAccepted = disclaimerVersion);
+      if (!mounted) return;
+    }
+    final settings = ref.read(settingsProvider);
     if (ref.read(profilesProvider).isEmpty && !settings.setupGuideShown && !args.contains('--hidden')) {
       ref.read(settingsProvider.notifier).update((s) => s.setupGuideShown = true);
       GuideTour.instance.start();
@@ -185,38 +200,71 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final index = tabs.indexOf(current);
     final colorScheme = context.colorScheme;
 
-    final body = IndexedStack(
+    final settings = ref.watch(settingsProvider.select((s) => (s.floatingNavBar, s.tabAnimation)));
+    final floating = settings.$1;
+    final body = TabStack(
       index: AppTab.values.indexOf(current),
+      animate: mobile,
+      fade: settings.$2 == 'fade',
       children: [for (final t in AppTab.values) KeyedSubtree(key: ValueKey(t), child: _page(t))],
     );
 
     if (mobile) {
+      void select(int i) => ref.read(currentTabProvider.notifier).go(tabs[i]);
       return Surface(
         color: SurfaceLevel.page.colorOf(colorScheme),
-        child: Stack(children: [
-          Positioned.fill(child: body),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: NavigationDock(
+        child: Column(children: [
+          Expanded(
+            child: Stack(children: [
+              Positioned.fill(
+                child: DockScope(
+                  floating: floating,
+                  child: floating ? body : MediaQuery.removePadding(context: context, removeBottom: true, child: body),
+                ),
+              ),
+              if (floating)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: NavigationDock(
+                    destinations: [
+                      for (final t in tabs)
+                        NavigationDockDestination(glyph: _dest(t).$1, label: _dest(t).$2),
+                    ],
+                    selectedIndex: index,
+                    onSelected: select,
+                  ),
+                ),
+            ]),
+          ),
+          // FlClash's docked bar, where the floating dock is turned off.
+          if (!floating)
+            NavigationBar(
               destinations: [
-                for (final t in tabs)
-                  NavigationDockDestination(glyph: _dest(t).$1, label: _dest(t).$2),
+                for (final (i, t) in tabs.indexed)
+                  NavigationDestination(
+                    icon: AnimatedGlyph(glyph: _dest(t).$1, filled: i == index),
+                    label: _dest(t).$2,
+                  ),
               ],
               selectedIndex: index,
-              onSelected: (i) => ref.read(currentTabProvider.notifier).go(tabs[i]),
+              onDestinationSelected: select,
             ),
-          ),
         ]),
       );
     }
 
-    return Surface(
-      color: SurfaceLevel.page.colorOf(colorScheme),
+    // Sidebar blur: the window's backdrop material shows through the rail
+    // (half its own colour over it); the pages keep their opaque surface.
+    final backdropOpacity = ref.watch(windowBlurProvider);
+    final page = SurfaceLevel.page.colorOf(colorScheme);
+    final chrome = colorScheme.chromeSurface;
+    return ColoredBox(
+      color: backdropOpacity != null ? const Color(0x00000000) : page,
       child: Row(children: [
         Surface(
-          color: colorScheme.chromeSurface,
+          color: backdropOpacity != null ? chrome.withValues(alpha: backdropOpacity) : chrome,
           shape: BorderDirectional(end: Divider.createBorderSide(context)),
           child: NavigationSidebar(
             destinations: [
@@ -224,14 +272,93 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             ],
             selectedIndex: index,
             expanded: ref.watch(sidebarExpandedProvider),
+            windowControls: windowControlsOverPage(isMobileView: false),
             onToggle: ref.read(sidebarExpandedProvider.notifier).toggle,
             onSelected: (i) => ref.read(currentTabProvider.notifier).go(tabs[i]),
           ),
         ),
-        Expanded(child: ClipRect(child: body)),
+        Expanded(child: ClipRect(child: ColoredBox(color: page, child: body))),
       ]),
     );
   }
+}
+
+/// The tabs' pages, all kept alive. On the phone a tab switch slides the
+/// pages across or cross-fades them in place (FlClash's tab animation);
+/// elsewhere it switches at once.
+class TabStack extends StatefulWidget {
+  const TabStack({super.key, required this.index, required this.children, this.animate = true, this.fade = false});
+
+  final int index;
+  final List<Widget> children;
+  final bool animate;
+  final bool fade;
+
+  @override
+  State<TabStack> createState() => _TabStackState();
+}
+
+class _TabStackState extends State<TabStack> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(vsync: this, value: 1);
+  int? _previous;
+
+  @override
+  void didUpdateWidget(TabStack old) {
+    super.didUpdateWidget(old);
+    if (old.index == widget.index) return;
+    if (!widget.animate) {
+      _controller.value = 1;
+      _previous = null;
+      return;
+    }
+    _previous = old.index;
+    _controller.duration = widget.fade ? fadeTabDuration : kTabScrollDuration;
+    final target = widget.index;
+    _controller.forward(from: 0).whenCompleteOrCancel(() {
+      if (mounted && widget.index == target) setState(() => _previous = null);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final previous = _previous;
+        final t = (widget.fade ? fadeTabCurve : Curves.easeOut).transform(_controller.value);
+        final dir = previous == null ? 0.0 : (widget.index > previous ? 1.0 : -1.0);
+        return Stack(fit: StackFit.expand, children: [
+          for (final (i, child) in widget.children.indexed)
+            _slot(
+              visible: i == widget.index || i == previous,
+              // Incoming page from the side it lies on, outgoing to the other.
+              dx: widget.fade || previous == null
+                  ? 0
+                  : (i == widget.index ? (1 - t) * dir : -t * dir),
+              opacity: !widget.fade || previous == null ? 1 : (i == widget.index ? t : 1 - t),
+              child: child,
+            ),
+        ]);
+      },
+    );
+  }
+
+  Widget _slot({required bool visible, required double dx, required double opacity, required Widget child}) => Offstage(
+        offstage: !visible,
+        child: TickerMode(
+          enabled: visible,
+          child: FractionalTranslation(
+            translation: Offset(dx, 0),
+            child: Opacity(opacity: opacity.clamp(0.0, 1.0), child: child),
+          ),
+        ),
+      );
 }
 
 /// Changes the traffic mode. While connected, tears the session down and

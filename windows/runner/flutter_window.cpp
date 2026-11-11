@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include <dwmapi.h>
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -376,6 +377,8 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  frame_.Attach(GetHandle(), flutter_controller_->view()->GetNativeWindow());
+  was_maximized_ = frame_.IsMaximized();
 
   activate_message_ = RegisterWindowMessageW(PURECONNECT_ACTIVATE_MESSAGE);
   // Let a non-elevated second launch reach us when we run as administrator.
@@ -451,6 +454,47 @@ void FlutterWindow::HandleWindowCall(
       result->Success(EncodableValue());
     } else {
       result->Success(EncodableValue(UpdateShortcutIcons(*index)));
+    }
+  } else if (method == "minimize") {
+    PostMessage(GetHandle(), WM_SYSCOMMAND, SC_MINIMIZE, 0);
+    result->Success(EncodableValue(true));
+  } else if (method == "maximize") {
+    if (!frame_.IsMaximized()) PostMessage(GetHandle(), WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    result->Success(EncodableValue(true));
+  } else if (method == "unmaximize") {
+    if (frame_.IsMaximized()) PostMessage(GetHandle(), WM_SYSCOMMAND, SC_RESTORE, 0);
+    result->Success(EncodableValue(true));
+  } else if (method == "isMaximized") {
+    result->Success(EncodableValue(frame_.IsMaximized()));
+  } else if (method == "startDragging") {
+    ReleaseCapture();
+    SendMessage(GetHandle(), WM_SYSCOMMAND, SC_MOVE | HTCAPTION, 0);
+    result->Success(EncodableValue(true));
+  } else if (method == "setAlwaysOnTop") {
+    const auto* value = args ? std::get_if<bool>(args) : nullptr;
+    SetWindowPos(GetHandle(), value != nullptr && *value ? HWND_TOPMOST : HWND_NOTOPMOST,
+                 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    result->Success(EncodableValue(true));
+  } else if (method == "isAlwaysOnTop") {
+    result->Success(EncodableValue(
+        (GetWindowLongW(GetHandle(), GWL_EXSTYLE) & WS_EX_TOPMOST) != 0));
+  } else if (method == "setEffect") {
+    const auto* map = args ? std::get_if<EncodableMap>(args) : nullptr;
+    bool ok = false;
+    if (map != nullptr) {
+      ok = frame_.SetBlur(IntField(*map, "enabled") != 0,
+                          static_cast<uint32_t>(IntField(*map, "tint")),
+                          IntField(*map, "dark") != 0);
+    }
+    result->Success(EncodableValue(ok));
+  } else if (method == "systemAccent") {
+    // The accent colour (DWM colorization), 0xAARRGGBB.
+    DWORD color = 0;
+    BOOL opaque = FALSE;
+    if (SUCCEEDED(DwmGetColorizationColor(&color, &opaque))) {
+      result->Success(EncodableValue(static_cast<int64_t>(color | 0xFF000000u)));
+    } else {
+      result->Success(EncodableValue());
     }
   } else if (method == "show") {
     start_hidden_ = false;
@@ -655,6 +699,20 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     // Dart hides the window to the tray when "minimise to tray" is on.
     Notify("minimized");
   }
+  if (message == WM_SIZE && wparam != SIZE_MINIMIZED) {
+    // The custom caption's maximize / restore button follows the window.
+    const bool maximized = wparam == SIZE_MAXIMIZED;
+    if (maximized != was_maximized_) {
+      was_maximized_ = maximized;
+      Notify(maximized ? "maximized" : "unmaximized");
+      // Maximized windows are square; restored ones round again (Windows 11).
+      frame_.UpdateCorners(maximized);
+    }
+  }
+  if (std::optional<LRESULT> handled =
+          frame_.HandleMessage(hwnd, message, wparam, lparam)) {
+    return *handled;
+  }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
@@ -670,6 +728,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case WM_SIZE:
+      // The view sits below the frame's top border strip (Windows 10).
+      frame_.PlaceView();
+      return 0;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

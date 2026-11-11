@@ -12,11 +12,31 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
   /// which hides to the menu bar or cleans up and calls "quit".
   var preventClose = false
 
+  /// Hosts the Flutter view over an NSVisualEffectView for the sidebar blur
+  /// (FlClash's WindowEffectView, MIT); inactive until Dart turns it on.
+  private var effectHost: EffectHostViewController?
+  private var flutterController: FlutterViewController?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    flutterController = flutterViewController
     let windowFrame = self.frame
-    self.contentViewController = flutterViewController
+    let host = EffectHostViewController(hosting: flutterViewController)
+    self.contentViewController = host
+    // macOS 12 detaches the outgoing controller's view only after loading the
+    // host, by then from the effect view, which leaves the window blank.
+    host.attachFlutterView()
+    effectHost = host
     self.setFrame(windowFrame, display: true)
+    self.minSize = NSSize(width: 380, height: 400)
+
+    // Immersive frame (FlClash): macOS 11+ keeps the traffic lights over a
+    // transparent, full-size title bar; the content runs under it.
+    if #available(macOS 11.0, *) {
+      self.titleVisibility = .hidden
+      self.titlebarAppearsTransparent = true
+      self.styleMask.insert(.fullSizeContentView)
+    }
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
@@ -61,6 +81,41 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
         DispatchQueue.main.async {
           (NSApp.delegate as? AppDelegate)?.finishQuit()
         }
+      case "minimize":
+        self.miniaturize(nil)
+        result(true)
+      case "maximize":
+        if !self.isZoomed { self.zoom(nil) }
+        result(true)
+      case "unmaximize":
+        if self.isZoomed { self.zoom(nil) }
+        result(true)
+      case "isMaximized":
+        result(self.isZoomed)
+      case "startDragging":
+        if let event = NSApp.currentEvent {
+          self.performDrag(with: event)
+        }
+        result(true)
+      case "setAlwaysOnTop":
+        let on = call.arguments as? Bool ?? false
+        self.level = on ? .floating : .normal
+        result(true)
+      case "isAlwaysOnTop":
+        result(self.level == .floating)
+      case "setEffect":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let enabled = args["enabled"] as? Bool ?? false
+        let dark = args["dark"] as? Bool ?? false
+        self.applyBlur(enabled: enabled, dark: dark)
+        result(enabled)
+      case "systemAccent":
+        if let c = NSColor.controlAccentColor.usingColorSpace(.sRGB) {
+          let a = 255, r = Int(c.redComponent * 255), g = Int(c.greenComponent * 255), b = Int(c.blueComponent * 255)
+          result((a << 24) | (r << 16) | (g << 8) | b)
+        } else {
+          result(nil)
+        }
       case "launchArgs":
         result(Array(CommandLine.arguments.dropFirst()))
       case "setDockIconVisible":
@@ -100,6 +155,28 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     makeKeyAndOrderFront(nil)
   }
 
+  /// Sidebar blur: the .sidebar material behind a transparent Flutter view.
+  func applyBlur(enabled: Bool, dark: Bool) {
+    guard let host = effectHost, let flutter = flutterController else { return }
+    let effectView = host.effectView
+    if enabled {
+      effectView.maskImage = nil
+      effectView.material = .sidebar
+      effectView.state = .followsWindowActiveState
+      effectView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+      flutter.backgroundColor = .clear
+      self.isOpaque = false
+      self.backgroundColor = .clear
+    } else {
+      effectView.maskImage = NSImage()
+      effectView.state = .inactive
+      flutter.backgroundColor = .windowBackgroundColor
+      self.isOpaque = true
+      self.backgroundColor = .windowBackgroundColor
+    }
+    self.hasShadow = true
+  }
+
   func notify(_ method: String) {
     windowChannel?.invokeMethod(method, arguments: nil)
   }
@@ -115,5 +192,42 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
       return false
     }
     return true
+  }
+}
+
+/// The Flutter view over an NSVisualEffectView (FlClash's
+/// EffectHostViewController, MIT).
+final class EffectHostViewController: NSViewController {
+  let flutterViewController: FlutterViewController
+  let effectView = NSVisualEffectView()
+
+  init(hosting flutterViewController: FlutterViewController) {
+    self.flutterViewController = flutterViewController
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    nil
+  }
+
+  override func loadView() {
+    effectView.frame = flutterViewController.view.frame
+    effectView.autoresizingMask = [.width, .height]
+    effectView.blendingMode = .behindWindow
+    effectView.state = .inactive
+    effectView.maskImage = NSImage()
+    addChild(flutterViewController)
+    attachFlutterView()
+    view = effectView
+  }
+
+  func attachFlutterView() {
+    let flutterView = flutterViewController.view
+    guard flutterView.superview !== effectView else { return }
+    flutterView.translatesAutoresizingMaskIntoConstraints = true
+    flutterView.frame = effectView.bounds
+    flutterView.autoresizingMask = [.width, .height]
+    effectView.addSubview(flutterView)
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueNotifier, visibleForTesting;
 import 'package:flutter/services.dart';
 
 /// The runner's `pureconnect/window` channel (windows/runner/flutter_window.cpp,
@@ -9,8 +10,11 @@ import 'package:flutter/services.dart';
 /// macOS setDockIconVisible / launchArgs; Windows proxyGet / proxySet /
 /// proxyGuard, notify, isElevated, runElevated, autostartGet / autostartSet,
 /// setShortcutIcon (all in-process, no helper processes).
+/// Immersive frame (FlClash style, all in the runners): minimize, maximize,
+/// unmaximize, isMaximized, startDragging, setAlwaysOnTop / isAlwaysOnTop,
+/// setEffect (sidebar blur: Mica / accent blur / vibrancy), systemAccent.
 /// Native → Dart: close (window close button while preventClose is on),
-/// minimized (window minimised),
+/// minimized (window minimised), maximized / unmaximized,
 /// quitRequested (macOS Cmd+Q / logout), activate (second launch, Dock click).
 class DesktopWindow {
   static const channel = MethodChannel('pureconnect/window');
@@ -24,6 +28,55 @@ class DesktopWindow {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Whether the runner hides the system title bar and the app draws its own
+  /// caption (FlClash's immersive frame): always on Windows and Linux; macOS
+  /// 11+ keeps the traffic lights over a transparent, full-size title bar.
+  static bool get customFrame => customFrameFor(Platform.operatingSystem, Platform.operatingSystemVersion);
+
+  @visibleForTesting
+  static bool customFrameFor(String os, String version) {
+    if (os == 'windows' || os == 'linux') return true;
+    if (os != 'macos') return false;
+    final m = RegExp(r'(\d+)\.').firstMatch(version) ?? RegExp(r'(\d+)').firstMatch(version);
+    final major = m == null ? 0 : int.tryParse(m.group(1)!) ?? 0;
+    return major > 10;
+  }
+
+  /// Maximized state, kept current from the runner's maximized / unmaximized
+  /// events (DesktopShell forwards them).
+  static final maximized = ValueNotifier<bool>(false);
+  static final alwaysOnTop = ValueNotifier<bool>(false);
+
+  static Future<void> minimize() => _call('minimize');
+  static Future<void> maximize() => _call('maximize');
+  static Future<void> unmaximize() => _call('unmaximize');
+  static Future<bool> isMaximized() async => await _call<bool>('isMaximized') ?? false;
+  static Future<void> toggleMaximize() async {
+    if (await isMaximized()) {
+      await unmaximize();
+    } else {
+      await maximize();
+    }
+  }
+
+  /// Starts moving the window with the pointer (caption drag area).
+  static Future<void> startDragging() => _call('startDragging');
+
+  static Future<void> setAlwaysOnTop(bool v) async {
+    await _call('setAlwaysOnTop', v);
+    alwaysOnTop.value = await _call<bool>('isAlwaysOnTop') ?? v;
+  }
+
+  /// Sidebar blur: the backdrop material behind a translucent app (Windows
+  /// 11 Mica, Windows 10 accent blur, macOS vibrancy). Returns how opaque the
+  /// sidebar keeps its own colour over it, or null when no effect is drawn
+  /// (off, Linux, unsupported).
+  static Future<double?> setBlur({required bool enabled, required bool dark, required int tint}) async {
+    if (!Platform.isWindows && !Platform.isMacOS) return null;
+    final r = await _call<bool>('setEffect', {'enabled': enabled, 'dark': dark, 'tint': tint});
+    return enabled && r == true ? 0.5 : null;
   }
 
   static Future<void> show() => _call('show');

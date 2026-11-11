@@ -3,6 +3,39 @@ import 'dart:io';
 
 enum AppThemeMode { system, light, dark }
 
+/// FlClash's default primary colours (iOS system colours, in the order of the
+/// macOS accent colours). The first is the default primary.
+const defaultPrimaryColors = [
+  0xFF007AFF,
+  0xFFCB30E0,
+  0xFFFF2D55,
+  0xFFFF383C,
+  0xFFFF8D28,
+  0xFFFFCC00,
+  0xFF34C759,
+  0xFF8E8E93,
+];
+const defaultPrimaryColor = 0xFF007AFF;
+
+/// Text scale range of the theme page's slider (FlClash's).
+const minTextScale = 0.8;
+const maxTextScale = 1.4;
+
+/// Version of the first-launch disclaimer. Raising it shows the disclaimer
+/// again, once, to everyone who accepted an older one.
+const disclaimerVersion = 1;
+
+/// Colour style of the generated scheme (prism_ui ColorStyle names).
+const colorStyles = ['vivid', 'tinted', 'soft', 'monochrome'];
+
+/// Liquid glass on the floating navigation dock.
+const liquidGlassModes = ['none', 'standard', 'ultra'];
+
+/// Whether the first-launch disclaimer still has to be shown, i.e. the user
+/// has not accepted the current [disclaimerVersion] (users updating from a
+/// version without it have 0).
+bool needsDisclaimer(int accepted) => accepted < disclaimerVersion;
+
 class PortForward {
   PortForward({this.network = 'tcp', this.bind = '', this.remote = ''});
   String network; // tcp | udp
@@ -86,6 +119,17 @@ class AppSettings {
     List<String>? customProxyDomains,
     this.themeMode = AppThemeMode.system,
     this.seedColor = 0xFF007AFF,
+    List<int>? primaryColors,
+    this.colorStyle = 'vivid',
+    this.pureBlack = false,
+    this.sidebarBlur = false,
+    this.liquidGlass = 'none',
+    this.floatingNavBar = true,
+    this.tabAnimation = 'slide',
+    this.customTextScale = false,
+    this.textScale = 1.0,
+    this.fontFamily = '',
+    this.disclaimerAccepted = 0,
     this.appIcon = 'a1',
     this.shareWarningSeen = false,
     this.useDynamicColor = false,
@@ -114,7 +158,8 @@ class AppSettings {
         customProxyDomains = customProxyDomains ?? [],
         bypassApps = bypassApps ?? List.of(defaultBypassApps),
         favoriteResources = favoriteResources ?? [],
-        updateMirrors = updateMirrors ?? [];
+        updateMirrors = updateMirrors ?? [],
+        primaryColors = primaryColors ?? List.of(defaultPrimaryColors);
 
   /// Android: VPN (like the old app). Desktop: system proxy, like FlClash —
   /// TUN needs administrator rights.
@@ -175,7 +220,31 @@ class AppSettings {
   List<String> customProxyDomains;
 
   AppThemeMode themeMode;
+  /// Selected primary colour (ignored while [useDynamicColor] follows the
+  /// system accent).
   int seedColor;
+  /// The swatches of the theme page: presets plus the user's own colours.
+  List<int> primaryColors;
+  /// prism_ui ColorStyle name: vivid / tinted / soft / monochrome.
+  String colorStyle;
+  /// Dark theme with black surfaces (AMOLED).
+  bool pureBlack;
+  /// Desktop (Windows / macOS): the sidebar shows the window's backdrop
+  /// material (Mica / blur / vibrancy) behind it.
+  bool sidebarBlur;
+  /// none / standard / ultra liquid glass on the floating dock.
+  String liquidGlass;
+  /// Phone layout: floating dock (true) or a docked bar.
+  bool floatingNavBar;
+  /// Phone layout: switching tabs slides (slide) or cross-fades (fade).
+  String tabAnimation;
+  /// Use [textScale] instead of the system text size.
+  bool customTextScale;
+  double textScale;
+  /// Installed font family the app uses; empty = the platform default.
+  String fontFamily;
+  /// Highest disclaimer version the user agreed to (0 = never).
+  int disclaimerAccepted;
   /// App icon id (see core/app_icon.dart); Android launcher / Windows window.
   String appIcon;
   /// User ticked "don't show again" on the share-includes-password warning.
@@ -263,6 +332,17 @@ class AppSettings {
         'customProxyDomains': customProxyDomains,
         'themeMode': themeMode.name,
         'seedColor': seedColor,
+        'primaryColors': primaryColors,
+        'colorStyle': colorStyle,
+        'pureBlack': pureBlack,
+        'sidebarBlur': sidebarBlur,
+        'liquidGlass': liquidGlass,
+        'floatingNavBar': floatingNavBar,
+        'tabAnimation': tabAnimation,
+        'customTextScale': customTextScale,
+        'textScale': textScale,
+        'fontFamily': fontFamily,
+        'disclaimerAccepted': disclaimerAccepted,
         'appIcon': appIcon,
         'shareWarningSeen': shareWarningSeen,
         'useDynamicColor': useDynamicColor,
@@ -332,6 +412,19 @@ class AppSettings {
       themeMode: AppThemeMode.values.firstWhere((e) => e.name == j['themeMode'],
           orElse: () => AppThemeMode.system),
       seedColor: v('seedColor', 0xFF007AFF),
+      primaryColors: _primaryColors(j['primaryColors'], v('seedColor', 0xFF007AFF)),
+      colorStyle: colorStyles.contains(j['colorStyle']) ? j['colorStyle'] as String : 'vivid',
+      pureBlack: v('pureBlack', false),
+      sidebarBlur: v('sidebarBlur', false),
+      liquidGlass: liquidGlassModes.contains(j['liquidGlass']) ? j['liquidGlass'] as String : 'none',
+      floatingNavBar: v('floatingNavBar', true),
+      tabAnimation: j['tabAnimation'] == 'fade' ? 'fade' : 'slide',
+      customTextScale: v('customTextScale', false),
+      textScale: (j['textScale'] is num ? (j['textScale'] as num).toDouble() : 1.0)
+          .clamp(minTextScale, maxTextScale)
+          .toDouble(),
+      fontFamily: v('fontFamily', ''),
+      disclaimerAccepted: v('disclaimerAccepted', 0),
       appIcon: v('appIcon', 'a1'),
       shareWarningSeen: v('shareWarningSeen', false),
       useDynamicColor: v('useDynamicColor', false),
@@ -356,4 +449,17 @@ class AppSettings {
       selectedProfileId: j['selectedProfileId'] as String?,
     );
   }
+}
+
+/// Saved swatches; settings from before 1.0.3 have none, so they get the
+/// presets plus their chosen colour when it is not one of them.
+List<int> _primaryColors(Object? raw, int seed) {
+  if (raw is List) {
+    final l = <int>[];
+    for (final e in raw) {
+      if (e is int && !l.contains(e)) l.add(e);
+    }
+    return l;
+  }
+  return [...defaultPrimaryColors, if (!defaultPrimaryColors.contains(seed)) seed];
 }

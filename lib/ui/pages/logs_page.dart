@@ -41,7 +41,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     final colorScheme = context.colorScheme;
     final mobile = isMobileLayout(context);
     final side = mobile ? 16.0 : 24.0;
-    final bottom = (mobile && !widget.pushed ? NavigationDock.heightOf(context) + 24 : 24) +
+    final bottom = (mobile && !widget.pushed ? dockInset(context) + 24 : 24) +
         MediaQuery.paddingOf(context).bottom;
 
     return AppPage(

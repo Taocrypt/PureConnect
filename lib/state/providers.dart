@@ -350,7 +350,9 @@ final proxyHealthProvider = NotifierProvider<ProxyHealthNotifier, ProxyHealth?>(
 /// Settings that only take effect on the next connection, as JSON.
 String connectionSettingsKey(AppSettings s) {
   final j = s.toJson();
-  for (final k in const ['favoriteResources', 'browserPackage', 'themeMode', 'seedColor', 'appIcon', 'useDynamicColor', 'locale', 'autoConnect', 'closeToTray', 'silentStart', 'hideDockIcon', 'shareWarningSeen', 'autoCheckUpdate', 'autoReconnect', 'reconnectDelay', 'notifications', 'minimizeToTray', 'warnProxyOverride', 'setupGuideShown']) {
+  for (final k in const ['favoriteResources', 'browserPackage', 'themeMode', 'seedColor', 'appIcon', 'useDynamicColor', 'locale', 'autoConnect', 'closeToTray', 'silentStart', 'hideDockIcon', 'shareWarningSeen', 'autoCheckUpdate', 'autoReconnect', 'reconnectDelay', 'notifications', 'minimizeToTray', 'warnProxyOverride', 'setupGuideShown',
+      'updateMirrorMode', 'updateMirrors', 'primaryColors', 'colorStyle', 'pureBlack', 'sidebarBlur', 'liquidGlass',
+      'floatingNavBar', 'tabAnimation', 'customTextScale', 'textScale', 'fontFamily', 'disclaimerAccepted']) {
     j.remove(k);
   }
   return jsonEncode(j);

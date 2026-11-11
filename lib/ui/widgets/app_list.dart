@@ -75,7 +75,7 @@ class _AppListViewState extends State<AppListView> {
   @override
   Widget build(BuildContext context) {
     final mobile = isMobileLayout(context);
-    final bottom = (mobile ? NavigationDock.heightOf(context) + 24 : 24) + MediaQuery.paddingOf(context).bottom;
+    final bottom = (mobile ? dockInset(context) + 24 : 24) + MediaQuery.paddingOf(context).bottom;
     final hPad = mobile ? 16.0 : 24.0;
     final apps = _visible();
     final hasNone = widget.noneLabel != null && _query.isEmpty;

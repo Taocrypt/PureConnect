@@ -11,6 +11,7 @@
 #include <string>
 
 #include "win32_window.h"
+#include "window_frame.h"
 
 // Registered window message a second launch posts to the running instance
 // (see main.cpp) so it shows its window.
@@ -72,6 +73,9 @@ class FlutterWindow : public Win32Window {
   // hides to the tray or cleans up and calls "quit".
   bool prevent_close_ = false;
   UINT activate_message_ = 0;
+  // Immersive frame: hidden caption, rounded corners, sidebar blur.
+  WindowFrame frame_;
+  bool was_maximized_ = false;
   std::optional<ProxySnapshot> proxy_guard_;
 };
 
