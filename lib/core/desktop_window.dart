@@ -79,8 +79,18 @@ class DesktopWindow {
     return enabled && r == true ? 0.5 : null;
   }
 
-  static Future<void> show() => _call('show');
-  static Future<void> hide() => _call('hide');
+  /// The window is hidden in the tray / menu bar (drives lightweight mode).
+  static final hidden = ValueNotifier<bool>(false);
+
+  static Future<void> show() {
+    hidden.value = false;
+    return _call('show');
+  }
+
+  static Future<void> hide() {
+    hidden.value = true;
+    return _call('hide');
+  }
   static Future<bool> isVisible() async => await _call<bool>('isVisible') ?? true;
   static Future<void> setPreventClose(bool v) => _call('setPreventClose', v);
   static Future<void> quit() => _call('quit');

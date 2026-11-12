@@ -28,6 +28,7 @@
 | 连接时询问未保存的账号密码或手机号；首次启动配置引导 | 弹窗 / 配置 → 添加 |
 | 额外内核参数（zju-connect 命令行格式）、PCAP / TLS 密钥导出与调试文件 | 工具 → 连接 → 高级 |
 | 最小化到托盘、系统代理排除、覆盖提示、清除系统代理、`--connect` 启动参数 | 工具 → 桌面 |
+| 轻量模式（默认关闭）：已连接且窗口隐藏到托盘 / 应用在后台达到设定分钟数（默认 3）后，界面完全退出、只留内核维持连接；再次打开应用自动接回 | 工具 → 桌面（Android：工具 → 应用） |
 | 日志导出、aTrust 清除登录缓存、恢复默认设置 | 日志 / 配置 → 编辑 / 备份与恢复 |
 | 检查更新（GitHub Release；Android 按架构下载 APK 并安装，桌面下载安装包），启动时自动检查；直连 GitHub 不通时自动测速选用镜像，可自定义镜像或始终直连 | 工具 → 关于 |
 | 沉浸式窗口（FlClash 同款）：隐藏系统标题栏，自绘标题栏（置顶 / 最小化 / 最大化 / 关闭、拖动、双击最大化），Windows 11 圆角；macOS 透明全尺寸标题栏 | 桌面窗口 |
@@ -52,6 +53,16 @@ Flutter UI ──JSON lines(stdin/stdout)──▶ zjuconnect-core (Go)
 * 窗口/托盘：原生 `pureconnect/window` 通道（`windows/runner/flutter_window.cpp`、`macos/Runner/MainFlutterWindow.swift`、
   `linux/runner/my_application.cc`）负责显示/隐藏、拦截关闭、退出、Windows 系统代理（注册表 + InternetSetOption，
   注销/关机时由原生代码恢复）；托盘用 `third_party/tray`（取自 FlClash，MIT，Linux 需 libayatana-appindicator3）。
+* 轻量模式（`lib/core/lightweight.dart`、`core/bridge/attach.go`）：界面给内核发 `detach`（附随机 token 与恢复计划），
+  此后内核在协议通道关闭时不再退出，改为监听 `127.0.0.1` 随机端口；端口与 token 写入数据目录的 `core_attach.json`
+  （仅当前用户可读）。下次启动先用 `ping` 握手确认内核存活，再以 `attach` 握手接回：内核回放状态、会话、界面不在时的日志、
+  拓扑与流量，之后实时推送，断开 / 停止走同一连接。只有启动内核的那条通道能设置 token 和恢复计划。内核因任何原因结束时
+  （断开、被挤下线、隧道错误）先按恢复计划还原系统代理（Windows 写回 WinINet 注册表；macOS / Linux 执行白名单内的
+  networksetup / gsettings / kwriteconfig 命令），删除接回文件，无界面时把错误写入 `core_exit.json` 供下次启动提示。
+  内核意外死亡时，下次启动 ping 失败即删除接回文件并按备份恢复系统代理。界面退出后**不保留托盘图标**（Flutter 进程已退出，
+  内核 / 提权内核内不另做原生托盘），重新打开应用即接回。Linux 以 root 运行的 TUN 内核无法访问用户会话的 gsettings，
+  此时由下次打开的界面恢复系统代理。Android：Activity 结束、Flutter 引擎随之销毁，`CoreService` 与其通知保留，
+  点击通知或重新打开应用即回放当前会话；界面不在时连接出错会发系统通知。
 * Android：Kotlin 前台服务 `CoreService`（VpnService）从 `nativeLibraryDir` 执行
   `libzjuconnect_core.so`，收到内核 `tun_request` 后建立 TUN，并通过抽象 Unix socket（SCM_RIGHTS）把 fd 传给内核；
   本应用 UID 被排除在 VPN 之外，避免内核到服务器的连接回环。

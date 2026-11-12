@@ -8,6 +8,7 @@ import '../core/backend.dart';
 import '../core/desktop_shell.dart';
 import '../core/desktop_window.dart';
 import '../core/errors.dart';
+import '../core/lightweight.dart';
 import '../core/protocol.dart';
 import '../core/system_proxy.dart';
 import '../l10n/strings.dart';
@@ -57,9 +58,53 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   bool _dialogOpen = false;
 
+  // Lightweight mode: count down while hidden (desktop: in the tray;
+  // Android: in the background) and connected, then exit the UI.
+  late final LightweightTimer _lightweight = LightweightTimer(onExpire: _lightweightExpired);
+  AppLifecycleListener? _lifecycle;
+  bool _backgrounded = false;
+
+  void _updateLightweight() {
+    if (!mounted) return;
+    final s = ref.read(settingsProvider);
+    _lightweight.update(
+      enabled: s.lightweightMode,
+      minutes: s.lightweightMinutes,
+      hidden: DesktopWindow.isDesktop ? DesktopWindow.hidden.value : _backgrounded,
+      connected: ref.read(coreProvider).state == CoreState.connected,
+    );
+  }
+
+  Future<void> _lightweightExpired() async {
+    if (!mounted) return;
+    if (DesktopWindow.isDesktop) {
+      await DesktopShell.instance.exitLightweight();
+    } else if (_backgrounded) {
+      await ref.read(coreProvider.notifier).enterLightweight();
+    }
+    // Still here (window shown again, not connected, refused): re-evaluate.
+    _updateLightweight();
+  }
+
+  @override
+  void dispose() {
+    _lightweight.cancel();
+    _lifecycle?.dispose();
+    if (DesktopWindow.isDesktop) DesktopWindow.hidden.removeListener(_updateLightweight);
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    if (DesktopWindow.isDesktop) {
+      DesktopWindow.hidden.addListener(_updateLightweight);
+    } else {
+      _lifecycle = AppLifecycleListener(onStateChange: (st) {
+        _backgrounded = st == AppLifecycleState.hidden || st == AppLifecycleState.paused;
+        _updateLightweight();
+      });
+    }
     GuideTour.instance.showTab = (tab) {
       if (!mounted) return;
       ref.read(currentTabProvider.notifier).go(switch (tab) {
@@ -105,6 +150,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       GuideTour.instance.start();
     }
     final connect = settings.autoConnect || args.contains('--connect');
+    // A session left running in lightweight mode is re-attached, never
+    // started a second time.
+    if (connect) await ref.read(coreProvider.notifier).ready;
+    if (!mounted) return;
     if (connect && ref.read(profilesProvider).isNotEmpty && !ref.read(coreProvider).isActive) {
       await toggleConnection(context, ref);
     }
@@ -175,6 +224,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.listen(settingsProvider.select((s) => (s.trafficMode, s.appIcon, s.selectedProfileId, s.locale)), tray);
       ref.listen(profilesProvider, tray);
     }
+    ref.listen(coreProvider.select((c) => c.state), (_, _) => _updateLightweight());
+    ref.listen(settingsProvider.select((s) => (s.lightweightMode, s.lightweightMinutes)), (_, _) => _updateLightweight());
     ref.listen<ProxyHealth?>(proxyHealthProvider, (prev, next) {
       if (next == null || prev?.ok == next.ok) return;
       if (!next.ok) {

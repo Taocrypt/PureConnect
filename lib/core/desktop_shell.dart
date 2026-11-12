@@ -45,6 +45,7 @@ class DesktopShell {
     DesktopWindow.channel.setMethodCallHandler(_onNative);
     await DesktopWindow.setPreventClose(true);
     DesktopWindow.maximized.value = await DesktopWindow.isMaximized();
+    DesktopWindow.hidden.value = !await DesktopWindow.isVisible();
     if (Platform.isMacOS && ref.read(settingsProvider).hideDockIcon) {
       await DesktopWindow.setDockIconVisible(false);
     }
@@ -84,7 +85,8 @@ class DesktopShell {
       case 'quitRequested':
         await quit();
       case 'activate':
-        break;
+        // Shown again by a second launch / the Dock icon.
+        DesktopWindow.hidden.value = false;
     }
     return null;
   }
@@ -179,6 +181,26 @@ class DesktopShell {
       // close button then quits instead of hiding.
       _trayShown = false;
     }
+  }
+
+  /// Lightweight mode: the window has been hidden long enough. Hands the
+  /// session to the core (which keeps running and will restore the system
+  /// proxy itself) and exits the whole UI process. No tray icon remains;
+  /// launching the app again re-attaches. Stays open when the core can't
+  /// take over (not connected, challenge pending, refused).
+  Future<void> exitLightweight() async {
+    final ref = _ref;
+    if (ref == null || _quitting) return;
+    if (await DesktopWindow.isVisible()) {
+      DesktopWindow.hidden.value = false;
+      return;
+    }
+    if (!await ref.read(coreProvider.notifier).enterLightweight()) return;
+    _quitting = true;
+    try {
+      await Tray.instance.hide().timeout(const Duration(seconds: 2));
+    } catch (_) {}
+    await DesktopWindow.quit();
   }
 
   /// Stops the core, restores the system proxy, removes the tray, exits.

@@ -6,5 +6,6 @@
     <string name="notify_total">total ↑%1$s ↓%2$s</string>
     <string name="notify_alerts">Alerts</string>
     <string name="notify_kicked">This account signed in on another device; this device was signed out</string>
+    <string name="notify_dropped_bg">VPN disconnected: %1$s</string>
     <string name="notify_updates">Updates</string>
 </resources>

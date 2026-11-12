@@ -13,6 +13,7 @@ import '../core/backup.dart';
 import '../core/config_builder.dart';
 import '../core/errors.dart';
 import '../core/extra_args.dart';
+import '../core/lightweight.dart';
 import '../core/notify.dart';
 import '../core/updater.dart' show currentAppVersion;
 import '../l10n/strings.dart';
@@ -25,6 +26,10 @@ import '../models/settings.dart';
 final prefsProvider = Provider<SharedPreferences>((ref) => throw UnimplementedError());
 
 final dataDirProvider = Provider<String>((ref) => throw UnimplementedError());
+
+/// Desktop: a core an earlier run left running in lightweight mode, found
+/// alive by main() before the UI starts (null when there is none).
+final detachedCoreProvider = Provider<AttachInfo?>((ref) => null);
 
 Future<String> resolveDataDir() async {
   final dir = await getApplicationSupportDirectory();
@@ -350,7 +355,7 @@ final proxyHealthProvider = NotifierProvider<ProxyHealthNotifier, ProxyHealth?>(
 /// Settings that only take effect on the next connection, as JSON.
 String connectionSettingsKey(AppSettings s) {
   final j = s.toJson();
-  for (final k in const ['favoriteResources', 'browserPackage', 'themeMode', 'seedColor', 'appIcon', 'useDynamicColor', 'locale', 'autoConnect', 'closeToTray', 'silentStart', 'hideDockIcon', 'shareWarningSeen', 'autoCheckUpdate', 'autoReconnect', 'reconnectDelay', 'notifications', 'minimizeToTray', 'warnProxyOverride', 'setupGuideShown',
+  for (final k in const ['favoriteResources', 'browserPackage', 'themeMode', 'seedColor', 'appIcon', 'useDynamicColor', 'locale', 'autoConnect', 'closeToTray', 'silentStart', 'hideDockIcon', 'shareWarningSeen', 'autoCheckUpdate', 'autoReconnect', 'reconnectDelay', 'notifications', 'minimizeToTray', 'lightweightMode', 'lightweightMinutes', 'warnProxyOverride', 'setupGuideShown',
       'updateMirrorMode', 'updateMirrors', 'primaryColors', 'colorStyle', 'pureBlack', 'sidebarBlur', 'liquidGlass',
       'floatingNavBar', 'tabAnimation', 'customTextScale', 'textScale', 'fontFamily', 'disclaimerAccepted']) {
     j.remove(k);
@@ -507,6 +512,23 @@ class CoreController extends Notifier<CoreStatus> {
   StreamSubscription<CoreEvent>? _sub;
   bool _systemProxySet = false;
 
+  // Lightweight mode.
+  /// This UI re-attached to a core that outlived an earlier UI: the core
+  /// restores the system proxy itself, so this UI never sets or clears it.
+  bool _coreOwnsProxy = false;
+  /// The attach info of the core this UI talks to over loopback (desktop).
+  AttachInfo? _attachInfo;
+  /// Set once the UI handed the session to the core and is about to exit:
+  /// whatever arrives afterwards (the link closing) must not tear it down.
+  bool _handedOff = false;
+  /// Desktop TUN core started elevated (root on Linux / macOS).
+  bool _elevatedCore = false;
+  final _ready = Completer<void>();
+
+  /// Completes once a session left running by an earlier UI has been found
+  /// (or not). Auto-connect waits for it, so it never starts a second core.
+  Future<void> get ready => _ready.future;
+
   // Auto reconnect / disconnect notification bookkeeping.
   bool _userStop = false;
   bool _wasConnected = false;
@@ -543,17 +565,140 @@ class CoreController extends Notifier<CoreStatus> {
     final backend = ref.read(backendProvider);
     _sub = backend.events.listen(_onEvent);
     ref.onDispose(() => _sub?.cancel());
+    final dataDir = ref.read(dataDirProvider);
     if (backend is AndroidCoreBackend) {
       // Re-attach to a session that kept running while the UI was gone.
-      Future.microtask(backend.requestReplay);
+      Future.microtask(() => _attachAndroid(backend, dataDir));
+      return const CoreStatus();
     }
+    final detached = ref.read(detachedCoreProvider);
+    if (backend is DesktopCoreBackend && detached != null) {
+      Future.microtask(() => _reattachDesktop(backend, detached));
+      return _statusFrom(detached, CoreState.connecting);
+    }
+    Future.microtask(() {
+      _surfaceExitNote(dataDir);
+      if (!_ready.isCompleted) _ready.complete();
+    });
     return const CoreStatus();
+  }
+
+  static CoreStatus _statusFrom(AttachInfo info, CoreState s, [String version = '']) => CoreStatus(
+        state: s,
+        version: version,
+        profileName: info.profileName,
+        trafficMode: TrafficMode.values.where((m) => m.name == info.trafficMode).firstOrNull,
+        startedAt: info.startedAt,
+      );
+
+  /// A detached core stopped with an error while no UI was around.
+  void _surfaceExitNote(String dataDir) {
+    final err = Lightweight.takeExitNote(dataDir);
+    if (err == null) return;
+    _log('warning', 'Lightweight mode: the session ended while the app was closed');
+    state = state.copyWith(state: CoreState.error, error: err);
+    _log('error', err);
+  }
+
+  Future<void> _reattachDesktop(DesktopCoreBackend backend, AttachInfo info) async {
+    final dataDir = ref.read(dataDirProvider);
+    _coreOwnsProxy = true;
+    _attachInfo = info;
+    _wasConnected = true;
+    if (info.applied != null) ref.read(appliedSettingsProvider.notifier).set(info.applied);
+    final ok = await backend.reattach(info);
+    if (ok) {
+      _log('info', 'Lightweight mode: re-attached to the running core');
+    } else {
+      // Died between the launch check and now.
+      _coreOwnsProxy = false;
+      _attachInfo = null;
+      _wasConnected = false;
+      Lightweight.remove(dataDir);
+      await SystemProxy.recoverStale(dataDir).catchError((_) => false);
+      state = CoreStatus(state: CoreState.stopped, version: state.version);
+      _surfaceExitNote(dataDir);
+    }
+    if (!_ready.isCompleted) _ready.complete();
+  }
+
+  Future<void> _attachAndroid(AndroidCoreBackend backend, String dataDir) async {
+    final running = await backend.isRunning();
+    final info = Lightweight.read(dataDir);
+    if (running) {
+      if (info != null) {
+        _wasConnected = true;
+        if (info.applied != null) ref.read(appliedSettingsProvider.notifier).set(info.applied);
+        state = _statusFrom(info, CoreState.connecting, state.version);
+      }
+    } else {
+      Lightweight.remove(dataDir);
+    }
+    await backend.requestReplay();
+    if (!_ready.isCompleted) _ready.complete();
+  }
+
+  /// Lightweight mode: hands the running session to the core so this UI
+  /// can exit. Desktop: the core keeps running detached and will restore
+  /// the system proxy itself; Android: the activity finishes, CoreService
+  /// stays. False when there is nothing to hand over (not connected, a
+  /// challenge pending) or the core refused; the UI then simply stays.
+  Future<bool> enterLightweight() async {
+    if (_handedOff) return true;
+    if (state.state != CoreState.connected || state.challenges.isNotEmpty || _reconnectTimer != null) return false;
+    final backend = ref.read(backendProvider);
+    final dataDir = ref.read(dataDirProvider);
+    final meta = AttachInfo(
+      profileName: state.profileName,
+      trafficMode: state.trafficMode?.name ?? '',
+      startedAt: state.startedAt,
+      applied: ref.read(appliedSettingsProvider),
+    );
+    if (backend is AndroidCoreBackend) {
+      await Lightweight.write(dataDir, meta);
+      _handedOff = true;
+      await backend.exitUi();
+      return true;
+    }
+    if (backend is! DesktopCoreBackend) return false;
+    final token = _attachInfo?.token ?? Lightweight.newToken();
+    final restore = <String, dynamic>{
+      'attach_file': Lightweight.attachFile(dataDir).path,
+      'exit_note': Lightweight.exitNoteFile(dataDir).path,
+      if (_systemProxySet) ...await SystemProxy.restorePlan(dataDir, rootCore: _elevatedCore && !Platform.isWindows),
+    };
+    final port = await backend.detach(token: token, restore: restore);
+    if (port == null) {
+      _log('warning', 'Lightweight mode: the core did not accept detaching; staying open');
+      return false;
+    }
+    try {
+      await Lightweight.write(dataDir, AttachInfo(
+        port: port,
+        token: token,
+        profileName: meta.profileName,
+        trafficMode: meta.trafficMode,
+        startedAt: meta.startedAt,
+        applied: meta.applied,
+      ));
+    } catch (e) {
+      // Without the file no UI could find the core again: stop instead of
+      // leaving an unreachable VPN behind.
+      _log('error', 'Lightweight mode: could not save the attach file: $e');
+      await disconnect();
+      return false;
+    }
+    _log('info', 'Lightweight mode: UI exits, the core keeps the connection');
+    _handedOff = true;
+    _systemProxySet = false;
+    return true;
   }
 
   void _log(String level, String msg) =>
       ref.read(logsProvider.notifier).add(LogEntry(DateTime.now(), level, msg));
 
   void _onEvent(CoreEvent ev) {
+    if (_handedOff) return;
     switch (ev) {
       case HelloEvent(:final version):
         state = state.copyWith(version: version);
@@ -567,7 +712,7 @@ class CoreController extends Notifier<CoreStatus> {
           _wasConnected = true;
           _reconnectAttempts = 0;
           state = state.copyWith(state: s, error: null, startedAt: state.startedAt ?? DateTime.now());
-          _applySystemProxy();
+          if (!_coreOwnsProxy) _applySystemProxy();
         } else if (s == CoreState.error) {
           state = state.copyWith(state: s, error: error, challenges: const []);
           if (error != null) _log('error', error);
@@ -604,6 +749,8 @@ class CoreController extends Notifier<CoreStatus> {
       case ProxyStatusEvent(:final ok, :final proxy):
         ref.read(proxyHealthProvider.notifier).set(ProxyHealth(ok, proxy));
       case ResultEvent():
+      case DetachedEvent():
+      case PongEvent():
         break;
     }
   }
@@ -611,6 +758,16 @@ class CoreController extends Notifier<CoreStatus> {
   void _onStopped({bool keepError = false}) {
     final error = keepError ? state.error : null;
     _clearSystemProxy();
+    if (_coreOwnsProxy || _attachInfo != null) {
+      // A re-attached core normally restored the proxy and removed its
+      // attach file itself; this covers it having crashed instead.
+      _coreOwnsProxy = false;
+      _attachInfo = null;
+      final dataDir = ref.read(dataDirProvider);
+      Lightweight.remove(dataDir);
+      if (SystemProxy.supported) SystemProxy.recoverStale(dataDir).catchError((_) => false);
+    }
+    if (Platform.isAndroid) Lightweight.remove(ref.read(dataDirProvider));
     ref.read(flowsProvider.notifier).set(const []);
     ref.read(trafficProvider.notifier).set(TrafficStats.zero);
     ref.read(appliedSettingsProvider.notifier).set(null);
@@ -722,6 +879,7 @@ class CoreController extends Notifier<CoreStatus> {
     final dataDir = ref.read(dataDirProvider);
     final android = Platform.isAndroid;
     final tun = settings.trafficMode == TrafficMode.tun;
+    _elevatedCore = tun && !android;
     if (settings.extraArgs.trim().isNotEmpty) {
       final errs = parseExtraArgs(settings.extraArgs).errors;
       if (errs.isNotEmpty) {

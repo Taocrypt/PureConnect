@@ -196,6 +196,118 @@ class SystemProxy {
     if (Platform.isWindows) await DesktopWindow.proxyGuard(null);
   }
 
+  // --- lightweight mode: restore without the UI ------------------------------
+
+  /// What a detached core runs to put the system proxy back when it stops
+  /// without a UI (see core/bridge/attach.go `RestorePlan`). Built from the
+  /// same backup [disable] restores from, mirroring [_restore] / [_forceOff].
+  /// Empty when there is nothing the core can do: then the backup stays and
+  /// the next UI launch restores from it ([recoverStale]).
+  ///
+  /// [rootCore]: the core runs as root (desktop TUN). Linux gsettings / KDE
+  /// settings belong to the user's session, which a root process can't
+  /// reach, so the core gets no plan there.
+  static Future<Map<String, dynamic>> restorePlan(String dataDir, {bool rootCore = false}) async {
+    if (!supported) return const {};
+    final f = _backupFile(dataDir);
+    Map<String, dynamic> snap = const {};
+    try {
+      if (f.existsSync()) snap = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+    } catch (_) {}
+    if (Platform.isWindows) {
+      final w = snap['windows'];
+      Map<String, dynamic>? target;
+      if (w is Map) {
+        target = w.cast<String, dynamic>();
+      } else {
+        final cur = await DesktopWindow.proxyGet();
+        if (cur != null) target = {...cur, 'enable': 0};
+      }
+      if (target == null) return const {};
+      return {'win_proxy': winProxyPlan(target), 'proxy_backup': f.path};
+    }
+    if (Platform.isLinux && rootCore) return const {};
+    final cmds = restoreCommands(
+      snap,
+      os: Platform.operatingSystem,
+      macServices: Platform.isMacOS ? await _macServices() : const [],
+      kdeTool: Platform.isLinux && _isKde ? await _kdeTool('kwriteconfig') : null,
+    );
+    if (cmds.isEmpty) return const {};
+    return {'exec': cmds, 'proxy_backup': f.path};
+  }
+
+  /// Windows: the WinINet values to write back, in the core's field names.
+  static Map<String, dynamic> winProxyPlan(Map<String, dynamic> w) => {
+        'enable': const ['1', 'true'].contains('${w['enable']}') ? 1 : 0,
+        'server': w['server'] as String? ?? '',
+        'bypass': w['bypass'] as String? ?? '',
+        'autoConfigUrl': w['autoConfigUrl'] as String?,
+      };
+
+  /// macOS / Linux: the commands [_restore] (or [_forceOff] without a
+  /// snapshot) would run, as argv lists (pure, tested).
+  static List<List<String>> restoreCommands(
+    Map<String, dynamic> snap, {
+    required String os,
+    List<String> macServices = const [],
+    String? kdeTool,
+  }) {
+    final out = <List<String>>[];
+    if (os == 'macos') {
+      final mac = snap['mac'];
+      if (mac is! Map) {
+        for (final s in macServices) {
+          out.add(['networksetup', '-setwebproxystate', s, 'off']);
+          out.add(['networksetup', '-setsecurewebproxystate', s, 'off']);
+          out.add(['networksetup', '-setsocksfirewallproxystate', s, 'off']);
+        }
+        return out;
+      }
+      for (final e in mac.entries) {
+        final s = e.key as String;
+        final v = (e.value as Map).cast<String, dynamic>();
+        void one(String set, String state, Object? m) {
+          final x = m is Map ? m : const {};
+          if (x['enabled'] == true && (x['server'] as String? ?? '').isNotEmpty) {
+            out.add(['networksetup', set, s, x['server'] as String, '${x['port'] ?? 0}']);
+          } else {
+            out.add(['networksetup', state, s, 'off']);
+          }
+        }
+        one('-setwebproxy', '-setwebproxystate', v['web']);
+        one('-setsecurewebproxy', '-setsecurewebproxystate', v['secure']);
+        one('-setsocksfirewallproxy', '-setsocksfirewallproxystate', v['socks']);
+        final b = (v['bypass'] as List?)?.cast<String>() ?? const [];
+        out.add(['networksetup', '-setproxybypassdomains', s, ...(b.isEmpty ? ['Empty'] : b)]);
+      }
+      return out;
+    }
+    if (os == 'linux') {
+      final gnome = snap['gnome'];
+      if (gnome is Map && gnome.isNotEmpty) {
+        final entries = gnome.entries.toList()
+          ..sort((a, b) => (a.key as String).endsWith(' mode') ? 1 : (b.key as String).endsWith(' mode') ? -1 : 0);
+        for (final e in entries) {
+          final k = (e.key as String).split(' ');
+          if (k.length == 2) out.add(['gsettings', 'set', k[0], k[1], e.value as String]);
+        }
+      } else {
+        out.add(['gsettings', 'set', 'org.gnome.system.proxy', 'mode', 'none']);
+      }
+      final kde = snap['kde'];
+      final kdeValues = kde is Map ? kde.cast<String, String>() : (gnome is Map && gnome.isNotEmpty ? null : {'ProxyType': '0'});
+      if (kdeTool != null && kdeValues != null) {
+        for (final e in kdeValues.entries) {
+          out.add([kdeTool, '--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', e.key, e.value]);
+        }
+        out.add(['dbus-send', '--type=signal', '/KIO/Scheduler',
+          'org.kde.KIO.Scheduler.reparseSlaveConfiguration', "string:''"]);
+      }
+    }
+    return out;
+  }
+
   // --- snapshot / restore ---------------------------------------------------
 
   static Future<Map<String, dynamic>> _snapshot() async {

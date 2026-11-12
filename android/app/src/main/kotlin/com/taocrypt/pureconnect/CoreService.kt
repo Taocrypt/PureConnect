@@ -351,7 +351,14 @@ class CoreService : VpnService() {
                         connected = false
                         // Kicked by a sign-in on another device: say so even
                         // when no UI is around (the core then stops itself).
-                        if (ev.optString("error").contains("kicked offline")) showKicked()
+                        val err = ev.optString("error")
+                        if (err.contains("kicked offline")) {
+                            showKicked()
+                        } else if (!CoreBus.uiAttached && err.isNotEmpty()) {
+                            // Lightweight mode closed the UI: nobody else
+                            // would tell the user the VPN went down.
+                            showAlert(getString(R.string.notify_dropped_bg, err))
+                        }
                     }
                     "stopping", "stopped" -> connected = false
                 }
@@ -468,6 +475,9 @@ class CoreService : VpnService() {
         }
     }
 
+    /** A session is running or starting (the UI may have been closed meanwhile). */
+    fun isRunning() = process != null || job?.isActive == true
+
     fun stopCore() {
         val proc = process
         if (proc == null) {
@@ -525,7 +535,9 @@ class CoreService : VpnService() {
             .build()
     }
 
-    private fun showKicked() {
+    private fun showKicked() = showAlert(getString(R.string.notify_kicked))
+
+    private fun showAlert(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(MainActivity.ALERT_CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(
@@ -535,7 +547,6 @@ class CoreService : VpnService() {
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
         val open = PendingIntent.getActivity(this, 3, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val text = getString(R.string.notify_kicked)
         nm.notify(MainActivity.ALERT_ID, NotificationCompat.Builder(this, MainActivity.ALERT_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("PureConnect")

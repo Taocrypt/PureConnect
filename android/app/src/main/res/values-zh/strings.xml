@@ -6,5 +6,6 @@
     <string name="notify_total">共 ↑%1$s ↓%2$s</string>
     <string name="notify_alerts">提醒</string>
     <string name="notify_kicked">账号已在其他设备登录，本机已被挤下线</string>
+    <string name="notify_dropped_bg">VPN 已断开：%1$s</string>
     <string name="notify_updates">更新下载</string>
 </resources>

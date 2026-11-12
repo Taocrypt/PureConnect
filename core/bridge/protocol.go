@@ -11,6 +11,7 @@ package main
 // guess where a log message ends.
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"strings"
@@ -22,7 +23,7 @@ const protocolVersion = 1
 
 // Command is a request from the UI.
 type Command struct {
-	Cmd string `json:"cmd"` // start | stop | challenge_response | auth_info | trust_device | version
+	Cmd string `json:"cmd"` // start | stop | challenge_response | auth_info | trust_device | version | probe | detach
 
 	// start / auth_info / trust_device
 	Config json.RawMessage `json:"config,omitempty"`
@@ -37,6 +38,13 @@ type Command struct {
 
 	// probe: connectivity test targets (results as "probe" events with ID)
 	Targets []ProbeTarget `json:"targets,omitempty"`
+
+	// detach (lightweight mode): keep running after the UI goes away and
+	// accept authenticated re-attaches on a loopback port. Token is the
+	// secret a later UI presents; Restore is what to undo when the core ends
+	// without a UI (only honoured from the channel that started the core).
+	Token   string       `json:"token,omitempty"`
+	Restore *RestorePlan `json:"restore,omitempty"`
 
 	// challenge_response / probe
 	ID       int64             `json:"id,omitempty"`
@@ -61,7 +69,7 @@ type Point struct {
 
 // Event is a message to the UI. Only the fields relevant for Type are set.
 type Event struct {
-	Type string `json:"type"` // hello | log | state | challenge | session | tun_request | auth_info | result
+	Type string `json:"type"` // hello | log | state | challenge | session | tun_request | auth_info | result | flows | traffic | probe | detached | pong
 	Time int64  `json:"time"` // unix millis
 
 	// hello
@@ -101,6 +109,10 @@ type Event struct {
 
 	// probe: one connectivity test result
 	Probe *ProbeResult `json:"probe,omitempty"`
+
+	// detached: the loopback port a later UI re-attaches on, and our pid
+	Port int `json:"port,omitempty"`
+	PID  int `json:"pid,omitempty"`
 }
 
 // TrafficInfo counts bytes on the connections to the VPN server.
@@ -147,23 +159,56 @@ type IPResourceInfo struct {
 	Protocol string `json:"protocol"`
 }
 
-// emitter serialises events onto the protocol channel.
+// emitter serialises events onto the protocol channel (the UI that started
+// the core) and, in lightweight mode, onto re-attached UIs (see attach.go).
 type emitter struct {
-	mu  sync.Mutex
-	enc *json.Encoder
+	mu      sync.Mutex
+	primary io.Writer // nil once the starting UI is gone
+	hub     *attachHub
 }
 
 func newEmitter(w io.Writer) *emitter {
-	enc := json.NewEncoder(w)
+	e := &emitter{primary: w}
+	e.hub = newAttachHub(e)
+	return e
+}
+
+func encodeEvent(ev Event) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	return &emitter{enc: enc}
+	_ = enc.Encode(ev)
+	return buf.Bytes()
 }
 
 func (e *emitter) emit(ev Event) {
 	ev.Time = time.Now().UnixMilli()
+	line := encodeEvent(ev)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	_ = e.enc.Encode(ev)
+	delivered := false
+	if e.primary != nil {
+		if _, err := e.primary.Write(line); err != nil {
+			// The starting UI is gone (lightweight mode exited it).
+			e.primary = nil
+		} else {
+			delivered = true
+		}
+	}
+	e.hub.publish(ev.Type, line, delivered)
+}
+
+// dropPrimary stops writing to the starting UI's channel.
+func (e *emitter) dropPrimary() {
+	e.mu.Lock()
+	e.primary = nil
+	e.mu.Unlock()
+}
+
+func (e *emitter) hasPrimary() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.primary != nil
 }
 
 func (e *emitter) log(level, msg string) {

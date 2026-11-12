@@ -145,6 +145,8 @@ class AppSettings {
     this.reconnectDelay = 5,
     this.notifications = true,
     this.minimizeToTray = false,
+    this.lightweightMode = false,
+    this.lightweightMinutes = 3,
     this.systemProxyBypass = '',
     this.warnProxyOverride = true,
     this.debugPcap = false,
@@ -274,6 +276,12 @@ class AppSettings {
   bool notifications;
   /// Desktop: minimising the window hides it to the tray.
   bool minimizeToTray;
+  /// Lightweight mode (轻量模式): after the window has been hidden in the
+  /// tray (desktop) or the app has been in the background (Android) for
+  /// [lightweightMinutes] while connected, the UI exits and only the core
+  /// keeps running; opening the app again re-attaches. Off by default.
+  bool lightweightMode;
+  int lightweightMinutes;
   /// Desktop: extra system-proxy exclusions (`;`, `,` or newline separated),
   /// added to the built-in local / private ranges.
   String systemProxyBypass;
@@ -359,6 +367,8 @@ class AppSettings {
         'reconnectDelay': reconnectDelay,
         'notifications': notifications,
         'minimizeToTray': minimizeToTray,
+        'lightweightMode': lightweightMode,
+        'lightweightMinutes': lightweightMinutes,
         'systemProxyBypass': systemProxyBypass,
         'warnProxyOverride': warnProxyOverride,
         'debugPcap': debugPcap,
@@ -441,6 +451,8 @@ class AppSettings {
       reconnectDelay: v('reconnectDelay', 5),
       notifications: v('notifications', true),
       minimizeToTray: v('minimizeToTray', false),
+      lightweightMode: v('lightweightMode', false),
+      lightweightMinutes: v('lightweightMinutes', 3).clamp(1, 1440).toInt(),
       systemProxyBypass: v('systemProxyBypass', ''),
       warnProxyOverride: v('warnProxyOverride', true),
       debugPcap: v('debugPcap', false),

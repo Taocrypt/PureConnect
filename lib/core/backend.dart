@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import 'desktop_window.dart';
+import 'lightweight.dart';
 import 'protocol.dart';
 
 /// Runs zjuconnect-core and turns its output into [CoreEvent]s.
@@ -298,10 +299,7 @@ class DesktopCoreBackend implements CoreBackend {
     final link = await _spawn(elevated: tun, sudoPassword: sudoPassword);
     _link = link;
     _attach(link, _events.add);
-    unawaited(link.exitCode.then((code) {
-      if (identical(_link, link)) _link = null;
-      _events.add(ExitEvent(code));
-    }));
+    _watchExit(link);
     _send(link, {
       'cmd': 'start',
       'config': config,
@@ -311,6 +309,61 @@ class DesktopCoreBackend implements CoreBackend {
   }
 
   void _send(_CoreLink link, Map<String, dynamic> cmd) => link.send(jsonEncode(cmd));
+
+  void _watchExit(_CoreLink link) {
+    unawaited(link.exitCode.then((code) {
+      if (identical(_link, link)) _link = null;
+      _events.add(ExitEvent(code));
+    }));
+  }
+
+  /// Lightweight mode: tells the running core to outlive this UI and accept
+  /// re-attaches. Returns the loopback port, or null when the core refused
+  /// or didn't answer (the UI then just stays).
+  Future<int?> detach({required String token, required Map<String, dynamic> restore}) async {
+    final link = _link;
+    if (link == null) return null;
+    final answer = events
+        .where((e) => e is DetachedEvent || (e is ResultEvent && !e.ok))
+        .first
+        .timeout(const Duration(seconds: 5));
+    _send(link, {'cmd': 'detach', 'token': token, 'restore': restore});
+    try {
+      final ev = await answer;
+      return ev is DetachedEvent && ev.port > 0 ? ev.port : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Connects to a core a previous UI left running in lightweight mode. The
+  /// core replays its state, session, unseen logs, topology and traffic,
+  /// then streams live; stop / probe go over the same connection.
+  Future<bool> reattach(AttachInfo info, {Duration timeout = const Duration(seconds: 3)}) async {
+    if (!info.canAttach) return false;
+    try {
+      final sock = await Socket.connect(InternetAddress.loopbackIPv4, info.port, timeout: timeout);
+      final lines = StreamController<String>();
+      final closed = Completer<void>();
+      sock.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen(
+            lines.add,
+            onError: (_) {},
+            onDone: () {
+              lines.close();
+              if (!closed.isCompleted) closed.complete();
+            },
+            cancelOnError: false,
+          );
+      final link = _SocketLink(sock, lines.stream, closed.future);
+      _link = link;
+      _attach(link, _events.add);
+      _watchExit(link);
+      sock.writeln(Lightweight.handshake(info.token));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   @override
   void probe(int id, List<ProbeTarget> targets) {
@@ -431,4 +484,17 @@ class AndroidCoreBackend implements CoreBackend {
 
   /// Current state, replayed by the service after the UI (re)attaches.
   Future<void> requestReplay() => _method.invokeMethod('replay');
+
+  /// Whether CoreService still runs a session (the UI was gone meanwhile).
+  Future<bool> isRunning() async {
+    try {
+      return await _method.invokeMethod<bool>('isRunning') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Lightweight mode: finish the activity (the Flutter engine goes away);
+  /// CoreService and its notification stay.
+  Future<void> exitUi() => _method.invokeMethod('exitUi');
 }

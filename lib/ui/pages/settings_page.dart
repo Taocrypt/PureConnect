@@ -11,6 +11,7 @@ import '../../core/app_icon.dart';
 import '../../core/autostart.dart';
 import '../../core/config_builder.dart' show debugDir;
 import '../../core/extra_args.dart';
+import '../../core/lightweight.dart';
 import '../../core/system_proxy.dart';
 import '../../core/desktop_window.dart';
 import '../../core/proxy_probe.dart';
@@ -324,6 +325,7 @@ class _DesktopSettingsState extends ConsumerState<_DesktopSettings> {
         value: s.minimizeToTray,
         onChanged: (v) => n.update((x) => x.minimizeToTray = v),
       ),
+      ...lightweightTiles(context, s, n),
       SettingsTile(
         glyph: AppGlyphs.connections,
         title: context.tr('system_proxy'),
@@ -346,6 +348,25 @@ class _DesktopSettingsState extends ConsumerState<_DesktopSettings> {
     ]);
   }
 }
+
+/// 轻量模式 switch and its delay (desktop: tray group; Android: app group).
+List<Widget> lightweightTiles(BuildContext context, AppSettings s, SettingsNotifier n) => [
+      SwitchTile(
+        glyph: AppGlyphs.bolt,
+        title: context.tr('lightweight_mode'),
+        subtitle: context.tr(Platform.isAndroid ? 'lightweight_mode_desc_android' : 'lightweight_mode_desc'),
+        value: s.lightweightMode,
+        onChanged: (v) => n.update((x) => x.lightweightMode = v),
+      ),
+      if (s.lightweightMode)
+        IntTile(
+          title: context.tr('lightweight_minutes'),
+          value: s.lightweightMinutes,
+          min: Lightweight.minMinutes,
+          max: Lightweight.maxMinutes,
+          onChanged: (v) => n.update((x) => x.lightweightMinutes = v),
+        ),
+    ];
 
 /// Desktop system proxy: extra exclusions, the "replace another app's
 /// proxy?" prompt, and a manual clean-up.
@@ -564,6 +585,8 @@ class _AppSettings extends ConsumerWidget {
         value: s.notifications,
         onChanged: (v) => n.update((x) => x.notifications = v),
       ),
+      // Android's "background behaviour"; desktop has it next to the tray.
+      if (Platform.isAndroid) ...lightweightTiles(context, s, n),
       if (Platform.isAndroid)
         FutureBuilder<String?>(
           future: appLabel(s.browserPackage),

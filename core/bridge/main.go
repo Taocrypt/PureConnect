@@ -64,6 +64,9 @@ func main() {
 	var handler *uiChallengeHandler
 	var handlerMu sync.Mutex
 	var shutdownOnce sync.Once
+	var lastErr string
+	var lastErrMu sync.Mutex
+	hub := em.hub
 	shutdown := func(code int) {
 		shutdownOnce.Do(func() {
 			em.state("stopping", nil)
@@ -72,6 +75,11 @@ func main() {
 				handler.cancelAll()
 			}
 			handlerMu.Unlock()
+			// Lightweight mode: put the system proxy back first (no UI will).
+			lastErrMu.Lock()
+			le := lastErr
+			lastErrMu.Unlock()
+			hub.finish(code, le, em.hasPrimary() || hub.clientCount() > 0)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			done := make(chan []error, 1)
@@ -85,46 +93,66 @@ func main() {
 				em.log("warning", "shutdown timed out")
 			}
 			em.state("stopped", nil)
+			hub.closeClients()
 			os.Exit(code)
 		})
+	}
+	fail := func(err error) {
+		lastErrMu.Lock()
+		lastErr = err.Error()
+		lastErrMu.Unlock()
+		em.state("error", err)
 	}
 
 	// A dead tunnel (e.g. kicked offline) ends the session cleanly.
 	setFatalHook(func(err error) {
-		em.state("error", err)
+		fail(err)
 		go shutdown(1)
 	})
 
 	commands := make(chan Command, 4)
+	// dispatch handles one command from the starting UI (primary) or a
+	// re-attached one. Quick ones run here; the rest queue for the loop below.
+	dispatch := func(cmd Command, primary bool) {
+		switch cmd.Cmd {
+		case "stop":
+			go shutdown(0)
+		case "probe":
+			go runProbe(em, cmd.ID, cmd.Targets)
+		case "challenge_response":
+			handlerMu.Lock()
+			h := handler
+			handlerMu.Unlock()
+			if h != nil {
+				h.deliver(cmd.ID, cmd.Response)
+			}
+		case "detach":
+			port, err := hub.detach(cmd.Token, cmd.Restore, primary)
+			if err != nil {
+				em.emit(Event{Type: "result", Error: err.Error()})
+			} else {
+				em.log("info", "lightweight mode: core keeps running without the UI")
+				em.emit(Event{Type: "detached", OK: true, Port: port, PID: os.Getpid()})
+			}
+		default:
+			commands <- cmd
+		}
+	}
+	hub.onClient = func(c net.Conn) {
+		readCommands(c, em, func(cmd Command) { dispatch(cmd, false) })
+	}
 	go func() {
-		sc := bufio.NewScanner(protocolIn)
-		sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
-		for sc.Scan() {
-			var cmd Command
-			if err := json.Unmarshal(sc.Bytes(), &cmd); err != nil {
-				em.log("error", "bad command: "+err.Error())
-				continue
-			}
-			switch cmd.Cmd {
-			case "stop":
-				go shutdown(0)
-			case "probe":
-				go runProbe(em, cmd.ID, cmd.Targets)
-			case "challenge_response":
-				handlerMu.Lock()
-				h := handler
-				handlerMu.Unlock()
-				if h != nil {
-					h.deliver(cmd.ID, cmd.Response)
-				}
-			default:
-				commands <- cmd
-			}
+		readCommands(protocolIn, em, func(cmd Command) { dispatch(cmd, true) })
+		if hub.isDetached() {
+			// Lightweight mode: the UI exited on purpose; keep the VPN up.
+			em.dropPrimary()
+			return
 		}
 		// The UI went away: finish queued commands, then exit (never outlive it).
 		close(commands)
 	}()
 
+	started := false
 	for cmd := range commands {
 		switch cmd.Cmd {
 		case "version":
@@ -165,9 +193,14 @@ func main() {
 			}
 
 		case "start":
+			if started {
+				em.log("error", "start: a session is already running")
+				continue
+			}
+			started = true
 			conf, err := loadConfig(cmd.Config)
 			if err != nil {
-				em.state("error", err)
+				fail(err)
 				shutdown(2)
 			}
 			h := newUIChallengeHandler(em, cmd.WorkDir)
@@ -177,7 +210,7 @@ func main() {
 			em.state("connecting", nil)
 			opts := startOptions{Tun: cmd.Tun, TunFDSocket: cmd.TunFDSocket, WorkDir: cmd.WorkDir}
 			if err := safeRun(func() error { return runSession(em, conf, opts, h) }); err != nil {
-				em.state("error", err)
+				fail(err)
 				shutdown(1)
 			}
 			// Services are running; keep serving challenge responses and stop.
@@ -187,6 +220,20 @@ func main() {
 		}
 	}
 	shutdown(0)
+}
+
+// readCommands decodes one JSON command per line until r ends.
+func readCommands(r io.Reader, em *emitter, handle func(Command)) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		var cmd Command
+		if err := json.Unmarshal(sc.Bytes(), &cmd); err != nil {
+			em.log("error", "bad command: "+err.Error())
+			continue
+		}
+		handle(cmd)
+	}
 }
 
 func safeRun(f func() error) (err error) {

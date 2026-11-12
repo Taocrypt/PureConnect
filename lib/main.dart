@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'core/app_icon.dart';
 import 'core/desktop_window.dart';
+import 'core/lightweight.dart';
 import 'core/system_proxy.dart';
 import 'state/providers.dart';
 
@@ -21,9 +22,18 @@ Future<void> main(List<String> args) async {
   final prefs = await SharedPreferences.getInstance();
   final dataDir = await resolveDataDir();
   _installErrorReporting(dataDir);
-  if (SystemProxy.supported) {
+  // Lightweight mode: an earlier UI exited and left its core running. Then
+  // the system proxy is live and the session gets re-attached, not reset.
+  AttachInfo? detached;
+  if (DesktopWindow.isDesktop) {
+    try {
+      detached = await pingDetachedCore(dataDir);
+    } catch (_) {}
+  }
+  if (SystemProxy.supported && detached == null) {
     // A previous run died with the system proxy on (crash, kill, power
-    // loss): put the user's own settings back before anything else.
+    // loss, or a detached core that died): put the user's own settings back
+    // before anything else.
     try {
       await SystemProxy.recoverStale(dataDir);
     } catch (_) {}
@@ -46,6 +56,7 @@ Future<void> main(List<String> args) async {
     overrides: [
       prefsProvider.overrideWithValue(prefs),
       dataDirProvider.overrideWithValue(dataDir),
+      detachedCoreProvider.overrideWithValue(detached),
     ],
     child: const ZjuConnectApp(),
   ));

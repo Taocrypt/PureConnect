@@ -233,6 +233,10 @@ sealed class CoreEvent {
         return null;
       case 'proxy_status':
         return ProxyStatusEvent(j['ok'] == true, j['message'] as String? ?? '', j['error'] as String?);
+      case 'detached':
+        return DetachedEvent((j['port'] as num?)?.toInt() ?? 0, (j['pid'] as num?)?.toInt() ?? 0);
+      case 'pong':
+        return PongEvent(coreStateFrom(j['state'] as String?), (j['pid'] as num?)?.toInt() ?? 0);
       case 'auth_info':
       case 'result':
         return ResultEvent(j['ok'] == true, j['error'] as String?, j['auth_info']);
@@ -412,4 +416,19 @@ class RawLogEvent extends CoreEvent {
 class ExitEvent extends CoreEvent {
   const ExitEvent(this.code);
   final int code;
+}
+
+/// Lightweight mode: the core keeps running without the UI and accepts
+/// re-attaches on 127.0.0.1:[port].
+class DetachedEvent extends CoreEvent {
+  const DetachedEvent(this.port, this.pid);
+  final int port;
+  final int pid;
+}
+
+/// Answer to a re-attach "ping": the detached core is alive.
+class PongEvent extends CoreEvent {
+  const PongEvent(this.state, this.pid);
+  final CoreState state;
+  final int pid;
 }

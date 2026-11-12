@@ -35,6 +35,12 @@ class MainActivity : FlutterActivity() {
     }
 
 
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        // The UI is going away: the service buffers log lines for the next one.
+        CoreBus.attach(null)
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     private var pendingStart: (() -> Unit)? = null
     private var pendingResult: MethodChannel.Result? = null
     private var pendingProbe: ((Boolean) -> Unit)? = null
@@ -83,6 +89,14 @@ class MainActivity : FlutterActivity() {
                 "replay" -> {
                     CoreBus.replay()
                     result.success(null)
+                }
+                "isRunning" -> result.success(CoreService.instance?.isRunning() == true)
+                "exitUi" -> {
+                    // Lightweight mode: close the UI; the Flutter engine goes
+                    // with the activity, CoreService and its notification stay.
+                    result.success(null)
+                    CoreBus.attach(null)
+                    runOnUiThread { finish() }
                 }
                 "probeProxyOwner" -> {
                     val port = call.argument<Int>("port") ?: 0
