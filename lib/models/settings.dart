@@ -258,7 +258,8 @@ class AppSettings {
   bool silentStart;
   /// macOS: no Dock icon (menu-bar only).
   bool hideDockIcon;
-  /// Check GitHub Releases for a new version on launch (at most once a day).
+  /// Offer a new version found by the launch check. The launch check itself
+  /// runs every launch regardless, so forced updates are always caught.
   bool autoCheckUpdate;
   /// Update downloads: 'auto' (direct when reachable, else built-in mirrors)
   /// or 'direct' (never built-in mirrors).

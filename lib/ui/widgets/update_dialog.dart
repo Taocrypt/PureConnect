@@ -15,29 +15,26 @@ import '../../state/providers.dart';
 import '../kit/common.dart';
 import '../kit/dashboard_kit.dart';
 
-const _lastCheckKey = 'update.lastCheck';
 const _lastLatestKey = 'update.lastLatest';
 const _forceMinKey = 'update.forceMin';
 bool _checking = false;
 
-/// Whether the launch-time check should run. A known forced update checks
-/// every launch; a newer version found earlier is shown again every launch
-/// until installed; otherwise once a day after the last *successful* check.
-/// With automatic checks off it still looks once a day, but only to catch
-/// forced updates.
-bool shouldAutoCheck({
+/// What the launch-time check shows once it has the latest release.
+///
+/// The launch check runs on every launch whatever the "check for updates on
+/// launch" setting says, because a forced update (the running version is
+/// below the release's minimum supported version) must always be caught; it
+/// is shown even with automatic checks off. A normal newer version is only
+/// offered while automatic checks are on.
+bool shouldPromptOnLaunch({
   required bool autoEnabled,
   required String current,
-  required DateTime now,
-  int? lastOkMs,
-  String? lastLatest,
-  String? forceMin,
+  required String latest,
+  String? minSupported,
 }) {
-  if (isForcedUpdate(current, forceMin)) return true;
-  final dayElapsed = lastOkMs == null || now.millisecondsSinceEpoch - lastOkMs >= const Duration(days: 1).inMilliseconds;
-  if (!autoEnabled) return dayElapsed;
-  final pending = lastLatest != null && lastLatest.isNotEmpty && compareVersions(lastLatest, current) > 0;
-  return dayElapsed || pending;
+  if (compareVersions(latest, current) <= 0) return false;
+  if (isForcedUpdate(current, minSupported)) return true;
+  return autoEnabled;
 }
 
 UpdateNetConfig updateNetConfig(WidgetRef ref) {
@@ -55,24 +52,14 @@ UpdateNetConfig updateNetConfig(WidgetRef ref) {
 /// Checks for a newer version (API, else update.json through mirrors).
 ///
 /// [manual]: from the "Check for updates" button: says when it is already
-/// up to date or the check failed. Otherwise (launch) it stays silent unless
-/// there is an update; see [shouldAutoCheck] for when it runs.
+/// up to date or the check failed. Otherwise (launch, every launch) it stays
+/// silent, offline included, unless there is an update to show; see
+/// [shouldPromptOnLaunch].
 Future<void> checkForUpdate(BuildContext context, WidgetRef ref, {bool manual = false}) async {
   if (_checking) return;
   final SharedPreferences prefs = ref.read(prefsProvider);
   final settings = ref.read(settingsProvider);
   final current = await currentAppVersion();
-  if (!manual &&
-      !shouldAutoCheck(
-        autoEnabled: settings.autoCheckUpdate,
-        current: current,
-        now: DateTime.now(),
-        lastOkMs: prefs.getInt(_lastCheckKey),
-        lastLatest: prefs.getString(_lastLatestKey),
-        forceMin: prefs.getString(_forceMinKey),
-      )) {
-    return;
-  }
   if (!context.mounted) return;
   _checking = true;
   try {
@@ -102,8 +89,6 @@ Future<void> checkForUpdate(BuildContext context, WidgetRef ref, {bool manual = 
       }
       return;
     }
-    // Only a successful check counts toward "once a day".
-    await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
     await prefs.setString(_lastLatestKey, latest.version);
     await prefs.setString(_forceMinKey, latest.minSupportedVersion ?? '');
     if (!context.mounted) return;
@@ -112,7 +97,15 @@ Future<void> checkForUpdate(BuildContext context, WidgetRef ref, {bool manual = 
       return;
     }
     final forced = latest.forces(current);
-    if (!manual && !settings.autoCheckUpdate && !forced) return;
+    if (!manual &&
+        !shouldPromptOnLaunch(
+          autoEnabled: settings.autoCheckUpdate,
+          current: current,
+          latest: latest.version,
+          minSupported: latest.minSupportedVersion,
+        )) {
+      return;
+    }
     await showFloatingDialog<void>(
       context: context,
       dismissible: false,

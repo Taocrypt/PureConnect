@@ -18,7 +18,7 @@ import 'package:zju_connect/ui/pages/theme_page.dart';
 
 class _IdleCore extends CoreController {
   @override
-  CoreStatus build() => const CoreStatus(version: 'v-test');
+  CoreStatus build() => const CoreStatus(version: 'v9.9.9 (zju-connect v0.9.0-21-g1a2b3c4)');
 }
 
 Future<void> _pump(WidgetTester tester, Widget home, {Size size = const Size(1080, 2340), double dpr = 2.75}) async {
@@ -86,13 +86,49 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('PureConnect'), findsOneWidget);
     expect(find.text('AGPL-3.0'), findsOneWidget);
-    expect(find.text('QQ 用户反馈群'), findsOneWidget);
-    expect(find.text('PureConnect用户反馈群'), findsOneWidget);
+    expect(find.text('反馈渠道'), findsOneWidget);
+    expect(find.text('PureConnect用户交流群'), findsOneWidget);
+    expect(find.text('github.com/Taocrypt/PureConnect'), findsOneWidget);
+    expect(find.text('内核与开源组件'), findsOneWidget);
     expect(find.text('免责声明'), findsOneWidget);
     expect(find.text('开源许可'), findsOneWidget);
     expect(find.textContaining('Telegram'), findsNothing);
     await _save(tester, 'about');
   });
+
+  test('core version label keeps only the core version', () {
+    expect(coreVersionLabel('v1.0.3 (zju-connect v0.9.0-21-g1a2b3c4)'), 'v1.0.3');
+    expect(coreVersionLabel('dev (zju-connect unknown)'), 'dev');
+    expect(coreVersionLabel(' 1.0.4 '), '1.0.4');
+    expect(coreVersionLabel(''), '');
+  });
+
+  for (final width in [1080.0, 990.0]) {
+    testWidgets('about page: version details show whole values (${width ~/ 3}dp wide)', (tester) async {
+      await _pump(tester, const AboutPage(), size: Size(width, 2340), dpr: 3);
+      await tester.ensureVisible(find.text('版本信息'));
+      await tester.pump();
+      await tester.tap(find.text('版本信息'));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(tester.takeException(), isNull);
+      // No app row (the header shows the app version), the core row shows
+      // the core version only.
+      expect(find.text('应用'), findsNothing);
+      expect(find.text('v9.9.9'), findsOneWidget);
+      expect(find.textContaining('zju-connect v0.9.0'), findsNothing);
+      for (final value in ['v9.9.9', 'Mythologyli/zju-connect', 'FlClash / prism_ui']) {
+        final text = tester.widget<Text>(find.text(value));
+        expect(text.overflow, isNot(TextOverflow.ellipsis), reason: value);
+        expect(text.maxLines, isNull, reason: value);
+        final paragraph = tester.renderObject<RenderParagraph>(
+            find.descendant(of: find.text(value), matching: find.byType(RichText)));
+        expect(paragraph.didExceedMaxLines, isFalse, reason: value);
+      }
+      await _save(tester, 'about_details_${width ~/ 3}');
+    });
+  }
 
   testWidgets('disclaimer: 同意 only with the phrase, 一键填入 fills it', (tester) async {
     bool? result;

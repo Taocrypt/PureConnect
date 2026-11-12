@@ -15,11 +15,19 @@ import '../widgets/update_dialog.dart';
 import 'disclaimer_page.dart';
 import 'update_mirrors_page.dart';
 
-/// PureConnect user feedback group (QQ).
+/// PureConnect user group (QQ), the feedback channel.
 const feedbackGroupUrl = 'https://qm.qq.com/q/tLAgIcTjFY';
-const feedbackGroupName = 'PureConnect用户反馈群';
+const feedbackGroupName = 'PureConnect用户交流群';
 const coreRepoUrl = 'https://github.com/Mythologyli/zju-connect';
 const licenseName = 'AGPL-3.0';
+
+/// The core's version alone. The core reports
+/// `<version> (zju-connect <upstream>)`; the upstream has its own row.
+String coreVersionLabel(String raw) {
+  final v = raw.trim();
+  final i = v.indexOf(' (');
+  return (i < 0 ? v : v.substring(0, i)).trim();
+}
 
 Future<void> _open(String url) => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
 
@@ -137,10 +145,9 @@ class _AboutPageState extends ConsumerState<AboutPage> {
             child: !_details
                 ? const SizedBox(width: double.infinity)
                 : Column(children: [
-                    _DetailRow(title: context.tr('app_version'), value: _appVersion.isEmpty ? '-' : _appVersion),
                     _DetailRow(
                         title: context.tr('core_version'),
-                        value: core.isEmpty ? context.tr('core_version_unknown') : core),
+                        value: coreVersionLabel(core).isEmpty ? context.tr('core_version_unknown') : coreVersionLabel(core)),
                     const _DetailRow(title: 'zju-connect', value: 'Mythologyli/zju-connect', url: coreRepoUrl),
                     _DetailRow(
                       title: context.tr('ui_design'),
@@ -215,16 +222,29 @@ class _DetailRow extends StatelessWidget {
     final cs = context.colorScheme;
     final row = Padding(
       padding: const EdgeInsets.fromLTRB(58, 10, 20, 10),
-      child: Row(spacing: 12, children: [
-        Text(title, style: AppTextStyle.subheadline.of(context)),
-        Expanded(
-          child: Text(value,
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
-              style: DashboardText.label(context, color: url == null ? null : cs.primary)),
+      // Title and value share the line when they fit; otherwise the value
+      // moves under the title, and wraps there, rather than being cut off.
+      child: SizedBox(
+        width: double.infinity,
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 4,
+          children: [
+            Text(title, style: AppTextStyle.subheadline.of(context)),
+            Row(mainAxisSize: MainAxisSize.min, spacing: 12, children: [
+              Flexible(
+                child: Text(value,
+                    textAlign: TextAlign.end,
+                    softWrap: true,
+                    style: DashboardText.label(context, color: url == null ? null : cs.primary)),
+              ),
+              if (url != null) GlyphIcon(AppGlyphs.openExternal, size: 16, color: cs.onSurfaceVariant),
+            ]),
+          ],
         ),
-        if (url != null) GlyphIcon(AppGlyphs.openExternal, size: 16, color: cs.onSurfaceVariant),
-      ]),
+      ),
     );
     if (url == null) return row;
     return PressRegion(onTap: () => _open(url!), overlay: PressRegion.hoverOverlay, child: row);

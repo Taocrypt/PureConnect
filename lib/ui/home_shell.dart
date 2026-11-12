@@ -72,7 +72,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       if (!mounted) return;
       _attachDesktop();
       _startup();
-      // Quietly look for a new release (setting, at most once a day).
+      // Quietly look for a new release every launch: a forced update is always
+      // shown, a normal one only with "check for updates on launch" on.
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) checkForUpdate(context, ref);
       });

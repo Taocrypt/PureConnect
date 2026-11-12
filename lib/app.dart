@@ -135,7 +135,16 @@ class ZjuConnectApp extends ConsumerWidget {
           ),
         );
       },
-      home: const HomeShell(),
+      // The home page sits in a HomeRoute (as FlClash does), whose settled
+      // page leaves its background unpainted: a CardPageRoute (what `home:`
+      // gets) fills the whole window with the opaque page surface, which hid
+      // the window's backdrop material from the blurred sidebar. The shell
+      // paints its own background, transparent only under the sidebar while
+      // the blur is on.
+      onGenerateRoute: (settings) => HomeRoute<void>(
+        settings: settings,
+        builder: (_) => const KeyboardInsetHold(child: HomeShell()),
+      ),
     );
   }
 }

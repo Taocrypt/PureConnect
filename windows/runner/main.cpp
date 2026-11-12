@@ -43,6 +43,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
+  // Render with Skia, as FlClash does. FlClash ships its sidebar blur (the
+  // same Mica / accent-blur runner code) on Skia; Impeller, the Windows
+  // default since Flutter 3.47, is not relied on to present a see-through
+  // view, and it can freeze the window while resizing
+  // (flutter/flutter#193504).
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();

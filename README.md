@@ -31,7 +31,7 @@
 | 日志导出、aTrust 清除登录缓存、恢复默认设置 | 日志 / 配置 → 编辑 / 备份与恢复 |
 | 检查更新（GitHub Release；Android 按架构下载 APK 并安装，桌面下载安装包），启动时自动检查；直连 GitHub 不通时自动测速选用镜像，可自定义镜像或始终直连 | 工具 → 关于 |
 | 沉浸式窗口（FlClash 同款）：隐藏系统标题栏，自绘标题栏（置顶 / 最小化 / 最大化 / 关闭、拖动、双击最大化），Windows 11 圆角；macOS 透明全尺寸标题栏 | 桌面窗口 |
-| 首次启动免责声明（需输入确认语句或一键填入后同意）、开源许可、QQ 用户反馈群 | 启动 / 工具 → 关于 |
+| 首次启动免责声明（需输入确认语句或一键填入后同意）、开源许可、反馈渠道（PureConnect用户交流群） | 启动 / 工具 → 关于 |
 
 ## 架构
 
@@ -83,7 +83,8 @@ flutter build macos --release    # macOS（内核放在 .app/Contents/Resources/
 * 更新内容写在 `CHANGELOG.md` 的 `## [x.y.z] - 日期` 小节。
 * 强制更新：在该小节中单独写一行 `最低支持版本: x.y.z`（或 `min-version: x.y.z`）。CI 会把它从可见说明中移除，
   改为 `<!-- min-version: x.y.z -->` 注释并写入 `update.json` 的 `min_supported_version`；低于该版本的应用
-  每次启动都会检查，并弹出无法关闭的更新对话框直到更新。
+  每次启动都会检查（不受“启动时检查更新”开关影响，离线时静默跳过），并弹出无法关闭的更新对话框直到更新；
+  该开关关闭时，普通（非强制）更新不会在启动时提示。
 * CI（`.github/workflows/build.yml`）：推送到 `main` 时构建全部平台并上传 artifacts；推送 `v*` tag 时额外创建
   GitHub Release（说明取自 CHANGELOG 对应小节，没有则用上一个 tag 以来的提交），附带：
   Android arm64-v8a / armeabi-v7a / x86_64 / universal APK、Windows zip + 安装程序、macOS universal dmg、
@@ -93,7 +94,7 @@ flutter build macos --release    # macOS（内核放在 .app/Contents/Resources/
 
 ## 用户反馈
 
-QQ 用户反馈群「PureConnect用户反馈群」：<https://qm.qq.com/q/tLAgIcTjFY>（应用内：工具 → 关于 → QQ 用户反馈群）。
+QQ 群「PureConnect用户交流群」：<https://qm.qq.com/q/tLAgIcTjFY>（应用内：工具 → 关于 → 反馈渠道）。
 
 ## 许可证
 

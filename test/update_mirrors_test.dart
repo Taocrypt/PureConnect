@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zju_connect/core/updater.dart';
-import 'package:zju_connect/ui/widgets/update_dialog.dart' show shouldAutoCheck;
+import 'package:zju_connect/ui/widgets/update_dialog.dart' show shouldPromptOnLaunch;
 
 /// Local HTTP server standing in for GitHub and the mirrors: `handler`
 /// gets the request path (for a mirror: `/https://github.com/...`).
@@ -264,26 +264,24 @@ void main() {
   });
 
   group('launch check', () {
-    final now = DateTime(2026, 11, 10, 12);
-    final hourAgo = now.subtract(const Duration(hours: 1)).millisecondsSinceEpoch;
-    final twoDaysAgo = now.subtract(const Duration(days: 2)).millisecondsSinceEpoch;
-
-    test('first launch / after a day checks', () {
-      expect(shouldAutoCheck(autoEnabled: true, current: '1.0.2', now: now), isTrue);
-      expect(shouldAutoCheck(autoEnabled: true, current: '1.0.2', now: now, lastOkMs: twoDaysAgo, lastLatest: '1.0.2'), isTrue);
+    test('a forced update is shown even with auto-check off', () {
+      expect(shouldPromptOnLaunch(autoEnabled: false, current: '1.0.1', latest: '1.0.4', minSupported: '1.0.2'), isTrue);
+      expect(shouldPromptOnLaunch(autoEnabled: true, current: '1.0.1', latest: '1.0.4', minSupported: '1.0.2'), isTrue);
     });
 
-    test('recent successful check with nothing new skips', () {
-      expect(shouldAutoCheck(autoEnabled: true, current: '1.0.2', now: now, lastOkMs: hourAgo, lastLatest: '1.0.2'), isFalse);
+    test('a normal update is not shown with auto-check off', () {
+      expect(shouldPromptOnLaunch(autoEnabled: false, current: '1.0.3', latest: '1.0.4'), isFalse);
+      expect(shouldPromptOnLaunch(autoEnabled: false, current: '1.0.3', latest: '1.0.4', minSupported: '1.0.2'), isFalse);
+      expect(shouldPromptOnLaunch(autoEnabled: false, current: '1.0.3', latest: '1.0.4', minSupported: ''), isFalse);
     });
 
-    test('a newer version found earlier is shown again every launch', () {
-      expect(shouldAutoCheck(autoEnabled: true, current: '1.0.2', now: now, lastOkMs: hourAgo, lastLatest: '1.0.3'), isTrue);
+    test('a normal update is shown with auto-check on', () {
+      expect(shouldPromptOnLaunch(autoEnabled: true, current: '1.0.3', latest: '1.0.4'), isTrue);
     });
 
-    test('forced update checks every launch, even with auto-check off', () {
-      expect(shouldAutoCheck(autoEnabled: false, current: '1.0.1', now: now, lastOkMs: hourAgo, forceMin: '1.0.2'), isTrue);
-      expect(shouldAutoCheck(autoEnabled: false, current: '1.0.2', now: now, lastOkMs: hourAgo, lastLatest: '1.0.3'), isFalse);
+    test('nothing newer, nothing shown', () {
+      expect(shouldPromptOnLaunch(autoEnabled: true, current: '1.0.4', latest: '1.0.4'), isFalse);
+      expect(shouldPromptOnLaunch(autoEnabled: false, current: '1.0.4', latest: '1.0.3', minSupported: '1.0.5'), isFalse);
     });
   });
 }
