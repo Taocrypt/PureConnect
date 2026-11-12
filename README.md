@@ -187,7 +187,7 @@ keyPassword=<你的密码>
 ## 反馈
 
 - 问题与建议：[Issues](https://github.com/Taocrypt/PureConnect/issues)
-- QQ 群「PureConnect用户交流群」：<https://qm.qq.com/q/tLAgIcTjFY>（应用内：工具 → 关于 → 反馈渠道）
+- QQ 群：<https://qm.qq.com/q/tLAgIcTjFY>（应用内：工具 → 关于 → 反馈渠道）
 
 ## 许可证与致谢
 
