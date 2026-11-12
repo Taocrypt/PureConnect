@@ -22,7 +22,7 @@
 
 ## 这是什么
 
-**PureConnect**（包名 `com.taocrypt.pureconnect`，当前版本 **1.0.4**）是一个用 Flutter 编写的图形客户端：
+**PureConnect**（包名 `com.taocrypt.pureconnect`）是一个用 Flutter 编写的图形客户端：
 
 - 以独立进程运行 **[zju-connect](https://github.com/Mythologyli/zju-connect)** 内核，通过 EasyConnect 或 aTrust 协议接入你已获授权访问的内网；
 - 提供统一的 Material 3 界面（风格参考 [FlClash](https://github.com/chen08209/FlClash)）：仪表盘、配置、资源、日志与工具页；
