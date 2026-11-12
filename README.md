@@ -203,7 +203,7 @@ keyPassword=<你的密码>
 
 ## English
 
-**PureConnect** (`com.taocrypt.pureconnect`, v1.0.4) is a cross-platform EasyConnect / aTrust client for **Android, Windows, macOS and Linux**, built with Flutter on top of the [zju-connect](https://github.com/Mythologyli/zju-connect) core.
+**PureConnect** (`com.taocrypt.pureconnect`) is a cross-platform EasyConnect / aTrust client for **Android, Windows, macOS and Linux**, built with Flutter on top of the [zju-connect](https://github.com/Mythologyli/zju-connect) core.
 
 - **Connect**: EasyConnect and aTrust (password, SMS, CAS, OAuth2, TOTP, client certificate, TWFID), with interactive second-factor and captcha prompts.
 - **Route traffic**: SOCKS5 / HTTP / Shadowsocks proxies, port forwarding, DNS options, system proxy, TUN (Android VpnService; elevated core on desktop via UAC / macOS authorization / `pkexec`), and an external upstream proxy.
