@@ -147,11 +147,6 @@ class DesktopShell {
         TrayMenuAction(label: line, enabled: false),
         const TrayMenuSeparator(),
         TrayMenuAction(label: s.t('tray_show'), onSelected: DesktopWindow.show),
-        TrayMenuAction(
-          label: core.isActive ? s.t('disconnect') : s.t('connect'),
-          enabled: profiles.isNotEmpty && core.state != CoreState.stopping,
-          onSelected: () => onToggleConnection?.call(),
-        ),
         TrayMenuSubmenu(label: s.t('traffic_mode'), items: [
           for (final m in modes)
             TrayMenuCheckbox(
@@ -169,6 +164,11 @@ class DesktopShell {
                 onSelected: () => onSwitchProfile?.call(p.id),
               ),
           ]),
+        TrayMenuAction(
+          label: core.isActive ? s.t('disconnect') : s.t('connect'),
+          enabled: profiles.isNotEmpty && core.state != CoreState.stopping,
+          onSelected: () => onToggleConnection?.call(),
+        ),
         const TrayMenuSeparator(),
         TrayMenuAction(label: s.t('tray_quit'), onSelected: quit),
       ],
